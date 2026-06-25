@@ -1,0 +1,12 @@
+# One-click deploy to Render's free tier.
+# In Render: New + > Blueprint > connect the repo containing this file.
+services:
+  - type: web
+    name: notice-finder
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --timeout 300 --workers 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.4"

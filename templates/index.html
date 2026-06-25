@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notice Finder — foreclosure & public-notice search</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>Notice Finder</h1>
+  <button id="refreshBtn" class="primary">Refresh data</button>
+</header>
+
+<div id="statusbar" class="statusbar"></div>
+
+<section class="filters">
+  <label>Source
+    <select id="f-source">
+      <option value="">All sources</option>
+      {% for s in sources %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Sale date from
+    <input type="date" id="f-from">
+  </label>
+  <label>Sale date to
+    <input type="date" id="f-to">
+  </label>
+  <label class="grow">Search text
+    <input type="search" id="f-q" placeholder="address, county, keyword…">
+  </label>
+  <button id="exportBtn">Export CSV</button>
+</section>
+
+<p id="count" class="count"></p>
+
+<div id="cards" class="cards"></div>
+<div id="empty" class="empty" hidden>No notices yet. Tap <strong>Refresh data</strong> to pull the latest.</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let timer = null;
+
+function qs() {
+  const p = new URLSearchParams();
+  const src = $('#f-source').value, f = $('#f-from').value,
+        t = $('#f-to').value, q = $('#f-q').value.trim();
+  if (src) p.set('source', src);
+  if (f) p.set('from', f);
+  if (t) p.set('to', t);
+  if (q) p.set('q', q);
+  return p.toString();
+}
+
+async function load() {
+  const r = await fetch('/api/notices?' + qs());
+  const data = await r.json();
+  renderStatus(data.status);
+  render(data.notices);
+  $('#count').textContent = data.count + ' notice' + (data.count === 1 ? '' : 's');
+}
+
+function renderStatus(st) {
+  const bar = $('#statusbar');
+  if (st.running) {
+    bar.className = 'statusbar working';
+    bar.textContent = 'Refreshing… pulling pages, this can take a minute.';
+    if (!timer) timer = setInterval(load, 3000);
+  } else {
+    if (timer) { clearInterval(timer); timer = null; }
+    bar.className = 'statusbar' + (st.error ? ' error' : '');
+    bar.textContent = st.error
+      ? 'Last refresh had an issue: ' + st.error
+      : (st.last_run ? 'Last updated ' + st.last_run.replace('T', ' ')
+                       + ' · ' + st.last_count + ' new' : 'Not yet refreshed.');
+  }
+}
+
+function field(label, val) {
+  return val ? `<div class="fld"><span>${label}</span><b>${val}</b></div>` : '';
+}
+
+function render(rows) {
+  $('#empty').hidden = rows.length > 0;
+  $('#cards').innerHTML = rows.map(n => `
+    <article class="card">
+      <div class="cardhead">
+        <span class="pub">${n.publication || n.source || 'Notice'}</span>
+        ${n.sale_date ? `<span class="saledate">${n.sale_date}${n.sale_time ? ' · ' + n.sale_time : ''}</span>` : ''}
+      </div>
+      ${field('Property', n.property_address)}
+      ${field('Sale location', n.court_location)}
+      ${field('Published', n.published_date)}
+      <details><summary>Full notice</summary><p class="full">${(n.full_text||'').replace(/</g,'&lt;')}</p>
+        ${n.url ? `<a href="${n.url}" target="_blank" rel="noopener">Open original ↗</a>` : ''}
+      </details>
+    </article>`).join('');
+}
+
+$('#refreshBtn').onclick = async () => {
+  await fetch('/api/refresh', {method: 'POST'});
+  setTimeout(load, 500);
+};
+$('#exportBtn').onclick = () => location = '/api/export.csv?' + qs();
+['f-source','f-from','f-to'].forEach(id => $('#'+id).onchange = load);
+$('#f-q').oninput = () => { clearTimeout(window._d); window._d = setTimeout(load, 300); };
+
+load();
+</script>
+</body>
+</html>
