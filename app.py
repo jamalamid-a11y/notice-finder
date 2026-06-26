@@ -44,7 +44,8 @@ def init_db():
                 id INTEGER PRIMARY KEY,
                 source TEXT, publication TEXT, published_date TEXT, title TEXT,
                 sale_date TEXT, sale_time TEXT, property_address TEXT,
-                court_location TEXT, full_text TEXT, url TEXT,
+                court_location TEXT, county TEXT, state TEXT,
+                full_text TEXT, url TEXT,
                 fingerprint TEXT UNIQUE
             )
         """)
@@ -60,12 +61,13 @@ def save(notices):
                 cur = c.execute("""
                     INSERT OR IGNORE INTO notices
                     (source, publication, published_date, title, sale_date,
-                     sale_time, property_address, court_location, full_text,
-                     url, fingerprint)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                     sale_time, property_address, court_location, county, state,
+                     full_text, url, fingerprint)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (d["source"], d["publication"], d["published_date"],
                       d["title"], d["sale_date"], d["sale_time"],
                       d["property_address"], d["court_location"],
+                      d["county"], d["state"],
                       d["full_text"], d["url"], fp))
                 rows += cur.rowcount
             except sqlite3.Error:
@@ -98,11 +100,15 @@ def run_refresh(source_id=None, max_pages=100):
 
 # --- query ------------------------------------------------------------------
 
-def query(source=None, dfrom=None, dto=None, q=None):
+def query(source=None, dfrom=None, dto=None, q=None, county=None, state=None):
     sql = "SELECT * FROM notices WHERE 1=1"
     args = []
     if source:
         sql += " AND source=?"; args.append(source)
+    if state:
+        sql += " AND state=?"; args.append(state)
+    if county:
+        sql += " AND county LIKE ?"; args.append(f"%{county}%")
     if dfrom:
         sql += " AND sale_date>=?"; args.append(dfrom)
     if dto:
@@ -127,8 +133,13 @@ def index():
 @app.route("/api/notices")
 def api_notices():
     rows = query(request.args.get("source"), request.args.get("from"),
-                 request.args.get("to"), request.args.get("q"))
-    return jsonify({"status": _status, "count": len(rows), "notices": rows})
+                 request.args.get("to"), request.args.get("q"),
+                 request.args.get("county"), request.args.get("state"))
+    everything = query()
+    counties = sorted({r["county"] for r in everything if r.get("county")})
+    states = sorted({r["state"] for r in everything if r.get("state")})
+    return jsonify({"status": _status, "count": len(rows), "notices": rows,
+                    "counties": counties, "states": states})
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -147,9 +158,11 @@ def api_status():
 @app.route("/api/export.csv")
 def export_csv():
     rows = query(request.args.get("source"), request.args.get("from"),
-                 request.args.get("to"), request.args.get("q"))
+                 request.args.get("to"), request.args.get("q"),
+                 request.args.get("county"), request.args.get("state"))
     cols = ["source", "publication", "sale_date", "sale_time",
-            "property_address", "court_location", "published_date", "url"]
+            "property_address", "county", "state", "court_location",
+            "published_date", "url"]
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(cols)
