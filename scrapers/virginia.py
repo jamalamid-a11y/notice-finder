@@ -1,25 +1,29 @@
 """
 Scraper for publicnoticevirginia.com.
 
-Classic ASP.NET WebForms app. A cookieless session id lives in the URL path
--- (S(xxxx)) -- and every request round-trips __VIEWSTATE / __EVENTVALIDATION.
-
-The real form field names (confirmed against the live page) are:
+Classic ASP.NET WebForms app: cookieless session in the URL path, __VIEWSTATE
+round-trips. Real field names (confirmed against the live page):
 
   search box   ctl00$ContentPlaceHolder1$as1$txtSearch
-  match type   ctl00$ContentPlaceHolder1$as1$rdoType         = AND | OR | EXACT
-  date mode    ctl00$ContentPlaceHolder1$as1$dateRange       = rbLastNumDays | rbRange | ...
-  last N days  ctl00$ContentPlaceHolder1$as1$txtLastNumDays
+  match type   ctl00$ContentPlaceHolder1$as1$rdoType      = AND | OR | EXACT
+  date mode    ctl00$ContentPlaceHolder1$as1$dateRange     = rbLastNumDays | rbRange
   date from/to ctl00$ContentPlaceHolder1$as1$txtDateFrom / txtDateTo
   search btn   ctl00$ContentPlaceHolder1$as1$btnGo
 
-Results render as <table class="nested"> blocks (publication / date / notice
-text). The pager is a GridView with image buttons (btnNext etc.) and a
-per-page <select> (ddlPerPage) that we set to 50 to minimise requests.
+Results render as <table class="nested"> blocks. The pager is a GridView with
+image buttons (btnNext) and a per-page <select> (ddlPerPage).
+
+IMPORTANT -- the 100-page cap: the site only lets you page through the first
+1000 records of ANY search. Foreclosure notices are republished weekly across
+many papers, so a broad multi-day search easily exceeds 1000 records and the
+older notices become unreachable (this is why a specific property could be
+missing). The fix is to search ONE DAY AT A TIME: a single day stays well under
+the cap, so every notice is reachable. We then merge + de-duplicate upstream.
 """
 
 import re
 import time
+from datetime import date, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -34,12 +38,13 @@ AS = "ctl00$ContentPlaceHolder1$as1$"
 GRID = "ctl00$ContentPlaceHolder1$WSExtendedGridNP1$GridView1$ctl01$"
 
 DEFAULT_KEYWORDS = (
-    "foreclosure, foreclose, foreclosed, trustee sale, judicial sale, "
-    "notice of sale, forfeiture, forfeit"
+    "real estate, foreclosure, foreclose, foreclosed, trustee sale, "
+    "judicial sale, notice of sale, forfeiture, forfeit"
 )
-LOOKBACK_DAYS = 60
-PER_PAGE = 50         # 5/10/15/20/25/30/50 are the site's allowed values
-PAGE_DELAY = 1.0
+LOOKBACK_DAYS = 30      # days back from today, searched one day at a time
+PER_PAGE = 50           # 5/10/15/20/25/30/50 are the site's allowed values
+PAGE_DELAY = 0.6        # seconds between requests (be polite)
+PAGE_CAP = 100          # site never serves past page 100
 
 
 class VirginiaScraper(BaseScraper):
@@ -78,30 +83,40 @@ class VirginiaScraper(BaseScraper):
 
     # -- main ----------------------------------------------------------------
 
-    def fetch(self, max_pages=100):
+    def fetch(self, max_pages=PAGE_CAP):
         sess = requests.Session()
         sess.headers.update({
             "User-Agent": "Mozilla/5.0 (notice-finder; public-records research)",
         })
 
-        # 1. land on the search page (picks up the cookieless session redirect)
         r = sess.get(BASE + SEARCH_PATH, timeout=30, allow_redirects=True)
         r.raise_for_status()
         action_url = r.url
         soup = BeautifulSoup(r.text, "lxml")
 
-        # 2. run the search
+        today = date.today()
+        for offset in range(self.lookback_days + 1):
+            day = today - timedelta(days=offset)
+            yield from self._fetch_day(sess, action_url, soup, day, max_pages)
+            # refresh soup reference for the next day's form state
+            soup = self._last_soup or soup
+
+    _last_soup = None
+
+    def _fetch_day(self, sess, action_url, soup, day, max_pages):
+        ds = f"{day.month}/{day.day}/{day.year}"   # m/d/Y, no zero-padding
+
         data = self._form_state(soup)
         data[AS + "txtSearch"] = self.keywords
-        data[AS + "rdoType"] = "OR"                 # match ANY of the keywords
-        data[AS + "dateRange"] = "rbLastNumDays"
-        data[AS + "txtLastNumDays"] = str(self.lookback_days)
-        data[AS + "btnGo"] = ""                      # press the search button
+        data[AS + "rdoType"] = "OR"
+        data[AS + "dateRange"] = "rbRange"
+        data[AS + "txtDateFrom"] = ds
+        data[AS + "txtDateTo"] = ds
+        data[AS + "btnGo"] = ""
         r = sess.post(action_url, data=data, timeout=60)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, "lxml")
 
-        # 3. bump results-per-page to 50 (autopostback on the dropdown)
         if soup.select_one(f"[name='{GRID}ddlPerPage']"):
             data = self._form_state(soup)
             data[GRID + "ddlPerPage"] = str(PER_PAGE)
@@ -111,7 +126,6 @@ class VirginiaScraper(BaseScraper):
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
 
-        # 4. walk pages via the Next image button
         for page in range(1, max_pages + 1):
             count = 0
             for notice in self._parse_results(soup):
@@ -122,15 +136,17 @@ class VirginiaScraper(BaseScraper):
             if not soup.select_one(f"[name='{GRID}btnNext']"):
                 break
             cur, total = self._page_info(soup)
-            if total and cur >= total:
+            if total and cur and cur >= total:
                 break
             data = self._form_state(soup)
-            data[GRID + "btnNext.x"] = "1"           # ImageButton needs x/y
+            data[GRID + "btnNext.x"] = "1"
             data[GRID + "btnNext.y"] = "1"
             time.sleep(PAGE_DELAY)
             r = sess.post(action_url, data=data, timeout=60)
             r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
+
+        self._last_soup = soup
 
     # -- parsing -------------------------------------------------------------
 
@@ -144,16 +160,16 @@ class VirginiaScraper(BaseScraper):
             if not re.search(r"sale|foreclos|trustee|judicial|auction|notice",
                              body, re.I):
                 continue
-            publication = lines[0]
             published = lines[1] if self._looks_like_date(lines[1]) else None
             fields = parse_all(body)
             link = block.find("a", href=True)
             yield Notice(
                 source=self.source_id,
-                publication=publication,
+                publication=lines[0],
                 published_date=published,
                 title=body[:140],
                 full_text=body,
+                state="VA",
                 url=(BASE + link["href"]) if link and link["href"].startswith("/")
                     else None,
                 **fields,
@@ -165,5 +181,9 @@ class VirginiaScraper(BaseScraper):
 
     @staticmethod
     def _page_info(soup):
-        m = re.search(r"Page\s+(\d+)\s+of\s+(\d+)", soup.get_text(" ", strip=True), re.I)
-        return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+        el = soup.select_one("[id*='lblCurrentPage']")
+        tot = soup.select_one("[id*='lblTotalPages']")
+        cur = int(el.get_text(strip=True)) if el and el.get_text(strip=True).isdigit() else None
+        m = re.search(r"(\d+)", tot.get_text(strip=True)) if tot else None
+        total = int(m.group(1)) if m else None
+        return cur, total
