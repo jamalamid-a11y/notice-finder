@@ -76,13 +76,15 @@ class HtmlTableScraper(BaseScraper):
         rows = table.find_all("tr")
         if len(rows) < 2:
             return
-        headers = [c.get_text(" ", strip=True).lower()
-                   for c in rows[0].find_all(["th", "td"])]
+        header_idx, headers = self._find_header(rows)
         col = self._map_columns(headers)
 
-        for tr in rows[1:]:
+        for tr in rows[header_idx + 1:]:
             cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
             if not cells or not any(cells):
+                continue
+            # skip repeated header rows
+            if [c.lower() for c in cells] == headers:
                 continue
             yield self._row_to_notice(cells, col)
 
@@ -101,6 +103,20 @@ class HtmlTableScraper(BaseScraper):
             if score >= 2 and rows > best_score:
                 best, best_score = t, rows
         return best
+
+    @staticmethod
+    def _find_header(rows):
+        """Find the row that is actually the column header (not always rows[0])."""
+        keys = ("date", "time", "address", "county", "jurisdiction",
+                "city", "state", "location", "case", "file", "bid")
+        best_idx, best_score, best_cells = 0, -1, []
+        for i, tr in enumerate(rows[:8]):
+            cells = [c.get_text(" ", strip=True).lower()
+                     for c in tr.find_all(["th", "td"])]
+            score = sum(any(k in c for k in keys) for c in cells)
+            if score > best_score:
+                best_idx, best_score, best_cells = i, score, cells
+        return best_idx, best_cells
 
     @staticmethod
     def _map_columns(headers):
