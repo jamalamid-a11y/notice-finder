@@ -21,6 +21,14 @@
       {% for s in sources %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}
     </select>
   </label>
+  <label>State
+    <input list="state-list" id="f-state" placeholder="any" autocomplete="off">
+    <datalist id="state-list"></datalist>
+  </label>
+  <label>County / city
+    <input list="county-list" id="f-county" placeholder="any" autocomplete="off">
+    <datalist id="county-list"></datalist>
+  </label>
   <label>Sale date from
     <input type="date" id="f-from">
   </label>
@@ -28,7 +36,7 @@
     <input type="date" id="f-to">
   </label>
   <label class="grow">Search text
-    <input type="search" id="f-q" placeholder="address, county, keyword…">
+    <input type="search" id="f-q" placeholder="address, keyword…">
   </label>
   <button id="exportBtn">Export CSV</button>
 </section>
@@ -45,18 +53,29 @@ let timer = null;
 function qs() {
   const p = new URLSearchParams();
   const src = $('#f-source').value, f = $('#f-from').value,
-        t = $('#f-to').value, q = $('#f-q').value.trim();
+        t = $('#f-to').value, q = $('#f-q').value.trim(),
+        county = $('#f-county').value.trim(), state = $('#f-state').value.trim();
   if (src) p.set('source', src);
+  if (state) p.set('state', state);
+  if (county) p.set('county', county);
   if (f) p.set('from', f);
   if (t) p.set('to', t);
   if (q) p.set('q', q);
   return p.toString();
 }
 
+function fillList(id, values) {
+  const dl = $('#' + id);
+  if (!dl) return;
+  dl.innerHTML = values.map(v => `<option value="${v}"></option>`).join('');
+}
+
 async function load() {
   const r = await fetch('/api/notices?' + qs());
   const data = await r.json();
   renderStatus(data.status);
+  fillList('county-list', data.counties || []);
+  fillList('state-list', data.states || []);
   render(data.notices);
   $('#count').textContent = data.count + ' notice' + (data.count === 1 ? '' : 's');
 }
@@ -90,6 +109,7 @@ function render(rows) {
         ${n.sale_date ? `<span class="saledate">${n.sale_date}${n.sale_time ? ' · ' + n.sale_time : ''}</span>` : ''}
       </div>
       ${field('Property', n.property_address)}
+      ${field('County', [n.county, n.state].filter(Boolean).join(', '))}
       ${field('Sale location', n.court_location)}
       ${field('Published', n.published_date)}
       <details><summary>Full notice</summary><p class="full">${(n.full_text||'').replace(/</g,'&lt;')}</p>
@@ -104,7 +124,8 @@ $('#refreshBtn').onclick = async () => {
 };
 $('#exportBtn').onclick = () => location = '/api/export.csv?' + qs();
 ['f-source','f-from','f-to'].forEach(id => $('#'+id).onchange = load);
-$('#f-q').oninput = () => { clearTimeout(window._d); window._d = setTimeout(load, 300); };
+['f-q','f-county','f-state'].forEach(id =>
+  $('#'+id).oninput = () => { clearTimeout(window._d); window._d = setTimeout(load, 300); });
 
 load();
 </script>
