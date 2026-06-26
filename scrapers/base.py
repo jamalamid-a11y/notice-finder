@@ -16,12 +16,13 @@ class Notice:
     __slots__ = (
         "source", "publication", "published_date", "title",
         "sale_date", "sale_time", "property_address", "court_location",
-        "full_text", "url",
+        "county", "state", "full_text", "url",
     )
 
     def __init__(self, source, publication=None, published_date=None, title=None,
                  sale_date=None, sale_time=None, property_address=None,
-                 court_location=None, full_text=None, url=None):
+                 court_location=None, county=None, state=None,
+                 full_text=None, url=None):
         self.source = source
         self.publication = publication
         self.published_date = published_date
@@ -30,6 +31,8 @@ class Notice:
         self.sale_time = sale_time
         self.property_address = property_address
         self.court_location = court_location
+        self.county = county
+        self.state = state
         self.full_text = full_text
         self.url = url
 
