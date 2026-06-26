@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notice Finder — foreclosure & trustee sale search</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-7 9 7"/><path d="M5 9v11h14V9"/><path d="M9 20v-6h6v6"/></svg>
+    </span>
+    <div>
+      <h1>Notice Finder</h1>
+      <p class="tagline">Foreclosure &amp; trustee sales across VA, MD &amp; DC — one searchable place</p>
+    </div>
+  </div>
+  <button id="refreshBtn" class="btn-primary">↻&nbsp;Refresh data</button>
+</header>
+
+<div id="statusbar" class="statusbar"></div>
+
+<main class="container">
+  <section class="filters">
+    <label>Source
+      <select id="f-source">
+        <option value="">All sources</option>
+        {% for s in sources %}<option value="{{ s.id }}">{{ s.label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>State
+      <select id="f-state"><option value="">All states</option></select>
+    </label>
+    <label>County / city <small>· none = all</small>
+      <select id="f-county" multiple size="1"></select>
+    </label>
+    <label>Sale date from
+      <input type="date" id="f-from">
+    </label>
+    <label>Sale date to
+      <input type="date" id="f-to">
+    </label>
+    <label class="grow">Search
+      <input type="search" id="f-q" placeholder="address, county, keyword…">
+    </label>
+    <div class="actions">
+      <button id="searchBtn" class="btn-primary">Search</button>
+      <button id="exportBtn">Export CSV</button>
+    </div>
+  </section>
+
+  <p id="count" class="count"></p>
+
+  <div id="cards" class="cards"></div>
+  <div id="empty" class="empty" hidden>
+    <div class="big">No sales loaded yet</div>
+    Tap <strong>Refresh data</strong> to pull the latest listings.
+  </div>
+
+  <details class="manual-sites">
+    <summary>Other sites — open manually (login, PowerBI or anti-bot)</summary>
+    <ul>
+      <li><a href="https://www.auction.com/residential/20105_zp/active_lt/resi_sort_v2_st/y_nbs/bank-owned,newly-foreclosed_at" target="_blank" rel="noopener">Auction.com</a></li>
+      <li><a href="https://www.xome.com/auctions/foreclosuresales?ss=Virginia" target="_blank" rel="noopener">Xome</a></li>
+      <li><a href="https://www.hubzu.com/near-me" target="_blank" rel="noopener">Hubzu</a></li>
+      <li><a href="https://www.ten-x.com/" target="_blank" rel="noopener">Ten-X</a></li>
+      <li><a href="https://member.realtytrac.com/" target="_blank" rel="noopener">RealtyTrac</a></li>
+      <li><a href="https://www.altisource.com/LoginPage.aspx" target="_blank" rel="noopener">Altisource</a></li>
+      <li><a href="https://www.foreclosure.com/" target="_blank" rel="noopener">Foreclosure.com</a></li>
+      <li><a href="https://www.loopnet.com/" target="_blank" rel="noopener">LoopNet</a></li>
+      <li><a href="https://www.crexi.com/" target="_blank" rel="noopener">Crexi</a></li>
+      <li><a href="https://www.tranzon.com/search.aspx" target="_blank" rel="noopener">Tranzon</a></li>
+      <li><a href="https://realestate.alexcooper.com/" target="_blank" rel="noopener">Alex Cooper</a></li>
+      <li><a href="https://ajbillig.com/auction-list/" target="_blank" rel="noopener">A.J. Billig</a></li>
+      <li><a href="https://www.tidewaterauctions.com/" target="_blank" rel="noopener">Tidewater Auctions</a></li>
+      <li><a href="https://www.dudleyresources.auction/" target="_blank" rel="noopener">Dudley Resources</a></li>
+      <li><a href="https://mtglaw.com/foreclosure-sales/" target="_blank" rel="noopener">McMichael Taylor Gray (PowerBI)</a></li>
+      <li><a href="https://www.logs.com/va-sales-report.html" target="_blank" rel="noopener">LOGS / Shapiro (PowerBI)</a></li>
+      <li><a href="https://sykesbourdon.com/foreclosure-listings/" target="_blank" rel="noopener">Sykes Bourdon</a></li>
+      <li><a href="https://publicnotices.washingtonpost.com/" target="_blank" rel="noopener">Washington Post public notices</a></li>
+      <li><a href="http://classified.washingtontimes.com/index.php" target="_blank" rel="noopener">Washington Times classifieds</a></li>
+    </ul>
+  </details>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let timer = null;
+let countiesByState = {};
+
+const STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID",
+  "IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
+  "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT",
+  "VT","VA","WA","WV","WI","WY"];
+
+const ICON_CAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
+const ICON_PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 10c0 7-9 12-9 12s-9-5-9-12a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>';
+const ICON_GAVEL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 13l-7 7"/><path d="M9 8l7 7"/><path d="M11 6l5 5"/><path d="M3 21h8"/></svg>';
+
+function initStates() {
+  $('#f-state').insertAdjacentHTML('beforeend',
+    STATES.map(s => `<option value="${s}">${s}</option>`).join(''));
+}
+function populateCounties() {
+  const st = $('#f-state').value;
+  const list = (countiesByState[st] || []);
+  const sel = $('#f-county');
+  sel.innerHTML = list.map(c => `<option value="${c}">${c}</option>`).join('');
+  sel.size = Math.min(Math.max(list.length, 1), 6);
+}
+function selectedCounties() {
+  return [...$('#f-county').selectedOptions].map(o => o.value);
+}
+function qs() {
+  const p = new URLSearchParams();
+  const src = $('#f-source').value, f = $('#f-from').value,
+        t = $('#f-to').value, q = $('#f-q').value.trim(), state = $('#f-state').value;
+  if (src) p.set('source', src);
+  if (state) p.set('state', state);
+  selectedCounties().forEach(c => p.append('county', c));
+  if (f) p.set('from', f);
+  if (t) p.set('to', t);
+  if (q) p.set('q', q);
+  return p.toString();
+}
+async function load() {
+  const r = await fetch('/api/notices?' + qs());
+  const data = await r.json();
+  renderStatus(data.status);
+  countiesByState = data.counties_by_state || {};
+  if (!$('#f-county').options.length) populateCounties();
+  render(data.notices);
+  $('#count').innerHTML = '<b>' + data.count + '</b> sale' + (data.count === 1 ? '' : 's') + ' found';
+}
+function renderStatus(st) {
+  const bar = $('#statusbar');
+  if (st.running) {
+    bar.className = 'statusbar working';
+    bar.textContent = 'Refreshing… pulling the latest listings, this can take a few minutes.';
+    if (!timer) timer = setInterval(load, 4000);
+  } else {
+    if (timer) { clearInterval(timer); timer = null; }
+    bar.className = 'statusbar' + (st.error ? ' error' : '');
+    bar.textContent = st.error
+      ? 'Last refresh had an issue: ' + st.error
+      : (st.last_run ? 'Last updated ' + st.last_run.replace('T', ' ')
+                       + ' · ' + st.last_count + ' new' : 'Tap Refresh data to load listings.');
+  }
+}
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function tag(icon, val) { return val ? `<span class="tag">${icon}${esc(val)}</span>` : ''; }
+
+function render(rows) {
+  $('#empty').hidden = rows.length > 0;
+  $('#cards').innerHTML = rows.map(n => {
+    const loc = [n.county, n.state].filter(Boolean).join(', ');
+    const badge = n.sale_date
+      ? `<span class="date-badge">${ICON_CAL}${n.sale_date}${n.sale_time ? ' · ' + n.sale_time : ''}</span>`
+      : `<span class="date-badge tbd">Date TBD</span>`;
+    return `
+    <article class="card">
+      <div class="card-top">
+        <span class="src-chip">${esc(n.publication || n.source || 'Notice')}</span>
+        ${badge}
+      </div>
+      <div class="addr">${esc(n.property_address || '—')}</div>
+      <div class="meta">
+        ${tag(ICON_PIN, loc)}
+        ${tag(ICON_GAVEL, n.court_location)}
+        ${n.published_date ? `<span class="tag">Pub. ${esc(n.published_date)}</span>` : ''}
+      </div>
+      <details><summary>Full notice</summary>
+        <p class="full">${esc(n.full_text)}</p>
+        ${n.url ? `<a href="${n.url}" target="_blank" rel="noopener">Open original ↗</a>` : ''}
+      </details>
+    </article>`;
+  }).join('');
+}
+
+$('#refreshBtn').onclick = async () => { await fetch('/api/refresh', {method: 'POST'}); setTimeout(load, 500); };
+$('#searchBtn').onclick = load;
+$('#exportBtn').onclick = () => location = '/api/export.csv?' + qs();
+$('#f-state').onchange = populateCounties;
+$('#f-q').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+
+initStates();
+load();
+</script>
+</body>
+</html>
