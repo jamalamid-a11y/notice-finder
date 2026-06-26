@@ -1,13 +1,13 @@
-undefined"""Scraper registry. Add a site by importing it and listing it in SCRAPERS."""
+"""Scraper registry. Add a site by importing it and listing it in SCRAPERS."""
 
 from .virginia import VirginiaScraper
 from .html_table import HtmlTableScraper
-from .extra import DivListScraper, PdfSalesScraper
+from .extra import DivListScraper, PdfSalesScraper, CsvScraper
 
 # Every scraper the app knows about.
 #  - VirginiaScraper: the publicnoticevirginia.com portal (day-by-day search).
 #  - HtmlTableScraper: law-firm sale lists that are plain static HTML tables.
-#  - DivListScraper / PdfSalesScraper: div-list and PDF sources.
+#  - DivListScraper / PdfSalesScraper / CsvScraper: div-list, PDF and CSV sources.
 SCRAPERS = [
     VirginiaScraper(),
     HtmlTableScraper("mwc", "Samuel I. White (MWC)",
@@ -20,10 +20,14 @@ SCRAPERS = [
                      "https://www.glasserlaw.com/New%20Folder/Foreclosure%20Sales.html"),
     HtmlTableScraper("valaw_hud", "Virginia Law Office (HUD)",
                      "https://www.virginialawoffice.com/hud"),
+    HtmlTableScraper("dolanreid", "Dolan Reid",
+                     "https://dolanreid.com/foreclosure-sales/"),
     DivListScraper("brockscott", "Brock & Scott",
                    "https://www.brockandscott.com/foreclosure-sales/?_sft_foreclosure_state=va",
                    item_selector="article.foreclosure_search",
                    field_selector="div.forecol"),
+    CsvScraper("cgd", "CGD Law",
+               "https://cgd-law.com/va/data/sales.csv", delimiter=";"),
     PdfSalesScraper("siwpc", "Samuel I. White (PDF)",
                     "https://www.siwpc.net/AutoUpload/Sales.pdf"),
 ]
