@@ -57,7 +57,7 @@ def save(notices):
             d = n.as_dict()
             fp = f"{d['source']}|{(d['full_text'] or '')[:200]}"
             try:
-                c.execute("""
+                cur = c.execute("""
                     INSERT OR IGNORE INTO notices
                     (source, publication, published_date, title, sale_date,
                      sale_time, property_address, court_location, full_text,
@@ -67,7 +67,7 @@ def save(notices):
                       d["title"], d["sale_date"], d["sale_time"],
                       d["property_address"], d["court_location"],
                       d["full_text"], d["url"], fp))
-                rows += c.rowcount
+                rows += cur.rowcount
             except sqlite3.Error:
                 pass
     return rows
