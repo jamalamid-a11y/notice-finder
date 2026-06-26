@@ -1,22 +1,25 @@
 """
 Scraper for publicnoticevirginia.com.
 
-The site is a classic ASP.NET WebForms app: a cookieless session id lives in
-the URL path -- (S(xxxx)) -- and every request must round-trip the hidden
-__VIEWSTATE / __EVENTVALIDATION fields. We therefore:
+Classic ASP.NET WebForms app. A cookieless session id lives in the URL path
+-- (S(xxxx)) -- and every request round-trips __VIEWSTATE / __EVENTVALIDATION.
 
-  1. GET the search page, following the redirect that assigns a session id.
-  2. Read every form field, then override the keyword + date inputs.
-  3. POST the search, then walk the pager via __doPostBack up to max_pages.
+The real form field names (confirmed against the live page) are:
 
-Field names are matched heuristically (by substring), so a cosmetic rename on
-the site usually won't break us. The CONFIG block at the top is where to tune
-the default search if you want different keywords or a different date window.
+  search box   ctl00$ContentPlaceHolder1$as1$txtSearch
+  match type   ctl00$ContentPlaceHolder1$as1$rdoType         = AND | OR | EXACT
+  date mode    ctl00$ContentPlaceHolder1$as1$dateRange       = rbLastNumDays | rbRange | ...
+  last N days  ctl00$ContentPlaceHolder1$as1$txtLastNumDays
+  date from/to ctl00$ContentPlaceHolder1$as1$txtDateFrom / txtDateTo
+  search btn   ctl00$ContentPlaceHolder1$as1$btnGo
+
+Results render as <table class="nested"> blocks (publication / date / notice
+text). The pager is a GridView with image buttons (btnNext etc.) and a
+per-page <select> (ddlPerPage) that we set to 50 to minimise requests.
 """
 
 import re
 import time
-from datetime import date, timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -27,13 +30,16 @@ from parsers import parse_all
 BASE = "https://www.publicnoticevirginia.com"
 SEARCH_PATH = "/Search.aspx"
 
-# --- default search ---------------------------------------------------------
+AS = "ctl00$ContentPlaceHolder1$as1$"
+GRID = "ctl00$ContentPlaceHolder1$WSExtendedGridNP1$GridView1$ctl01$"
+
 DEFAULT_KEYWORDS = (
-    "foreclosure, foreclosed, foreclose, judicial sale, judgment, "
-    "notice of sale, trustee's sale, forfeiture, forfeit"
+    "foreclosure, foreclose, foreclosed, trustee sale, judicial sale, "
+    "notice of sale, forfeiture, forfeit"
 )
-LOOKBACK_DAYS = 60  # search window: today-LOOKBACK_DAYS .. today
-PAGE_DELAY = 1.0    # seconds between page requests (be polite)
+LOOKBACK_DAYS = 60
+PER_PAGE = 50         # 5/10/15/20/25/30/50 are the site's allowed values
+PAGE_DELAY = 1.0
 
 
 class VirginiaScraper(BaseScraper):
@@ -44,11 +50,10 @@ class VirginiaScraper(BaseScraper):
         self.keywords = keywords
         self.lookback_days = lookback_days
 
-    # -- helpers -------------------------------------------------------------
+    # -- form helpers --------------------------------------------------------
 
     @staticmethod
     def _form_state(soup):
-        """Collect all hidden + visible form fields into a POST dict."""
         data = {}
         for el in soup.select("input"):
             name = el.get("name")
@@ -71,15 +76,6 @@ class VirginiaScraper(BaseScraper):
                 data[ta["name"]] = ta.text
         return data
 
-    @staticmethod
-    def _match_field(data, *needles):
-        """Return the first form-field name whose key contains any needle."""
-        for name in data:
-            low = name.lower()
-            if any(n in low for n in needles):
-                return name
-        return None
-
     # -- main ----------------------------------------------------------------
 
     def fetch(self, max_pages=100):
@@ -91,111 +87,83 @@ class VirginiaScraper(BaseScraper):
         # 1. land on the search page (picks up the cookieless session redirect)
         r = sess.get(BASE + SEARCH_PATH, timeout=30, allow_redirects=True)
         r.raise_for_status()
-        action_url = r.url  # now carries the (S(...)) session segment
+        action_url = r.url
         soup = BeautifulSoup(r.text, "lxml")
 
+        # 2. run the search
         data = self._form_state(soup)
-
-        # 2. fill in keyword + date range
-        kw = self._match_field(data, "keyword", "txtsearch", "searchtext")
-        if kw:
-            data[kw] = self.keywords
-        d_from = self._match_field(data, "datefrom", "fromdate", "startdate", "pubfrom")
-        d_to = self._match_field(data, "dateto", "todate", "enddate", "pubto")
-        end = date.today()
-        start = end - timedelta(days=self.lookback_days)
-        if d_from:
-            data[d_from] = start.strftime("%m/%d/%Y")
-        if d_to:
-            data[d_to] = end.strftime("%m/%d/%Y")
-
-        # press the search button if we can find it
-        btn = None
-        for el in soup.select("input[type=submit], input[type=button]"):
-            val = (el.get("value") or "").lower()
-            if "search" in val and el.get("name"):
-                btn = el["name"]
-                break
-        if btn:
-            data[btn] = soup.select_one(f"[name='{btn}']").get("value", "Search")
-
+        data[AS + "txtSearch"] = self.keywords
+        data[AS + "rdoType"] = "OR"                 # match ANY of the keywords
+        data[AS + "dateRange"] = "rbLastNumDays"
+        data[AS + "txtLastNumDays"] = str(self.lookback_days)
+        data[AS + "btnGo"] = ""                      # press the search button
         r = sess.post(action_url, data=data, timeout=60)
         r.raise_for_status()
+        soup = BeautifulSoup(r.text, "lxml")
 
-        seen = 0
-        for page in range(1, max_pages + 1):
+        # 3. bump results-per-page to 50 (autopostback on the dropdown)
+        if soup.select_one(f"[name='{GRID}ddlPerPage']"):
+            data = self._form_state(soup)
+            data[GRID + "ddlPerPage"] = str(PER_PAGE)
+            data["__EVENTTARGET"] = GRID + "ddlPerPage"
+            data["__EVENTARGUMENT"] = ""
+            r = sess.post(action_url, data=data, timeout=60)
+            r.raise_for_status()
             soup = BeautifulSoup(r.text, "lxml")
+
+        # 4. walk pages via the Next image button
+        for page in range(1, max_pages + 1):
             count = 0
             for notice in self._parse_results(soup):
                 count += 1
-                seen += 1
                 yield notice
-
-            if count == 0 and page > 1:
-                break  # ran past the last page
-
-            nxt = self._next_postback(soup, page + 1)
-            if not nxt:
+            if count == 0:
+                break
+            if not soup.select_one(f"[name='{GRID}btnNext']"):
+                break
+            cur, total = self._page_info(soup)
+            if total and cur >= total:
                 break
             data = self._form_state(soup)
-            data["__EVENTTARGET"], data["__EVENTARGUMENT"] = nxt
+            data[GRID + "btnNext.x"] = "1"           # ImageButton needs x/y
+            data[GRID + "btnNext.y"] = "1"
             time.sleep(PAGE_DELAY)
             r = sess.post(action_url, data=data, timeout=60)
             r.raise_for_status()
+            soup = BeautifulSoup(r.text, "lxml")
 
     # -- parsing -------------------------------------------------------------
 
     def _parse_results(self, soup):
-        """
-        Each result is a block of notice text. The site renders them in a
-        results panel; we grab the repeating containers and fall back to
-        scanning for notice-like blocks if the markup differs.
-        """
-        containers = soup.select(
-            ".searchResult, .result, .notice, .NoticeResult, "
-            "[id*='Result'] tr, [class*='result']"
-        )
-        if not containers:
-            # fallback: any table rows in a results-looking table
-            containers = soup.select("table tr")
-
-        for c in containers:
-            text = c.get_text(" ", strip=True)
-            if len(text) < 40:
+        for block in soup.select("table.nested"):
+            text = block.get_text("\n", strip=True)
+            lines = [ln for ln in (l.strip() for l in text.split("\n")) if ln]
+            if len(lines) < 2:
                 continue
+            body = " ".join(lines[2:]) if len(lines) > 2 else " ".join(lines)
             if not re.search(r"sale|foreclos|trustee|judicial|auction|notice",
-                             text, re.I):
+                             body, re.I):
                 continue
-            fields = parse_all(text)
-            link = c.find("a", href=True)
+            publication = lines[0]
+            published = lines[1] if self._looks_like_date(lines[1]) else None
+            fields = parse_all(body)
+            link = block.find("a", href=True)
             yield Notice(
                 source=self.source_id,
-                publication=self._guess_publication(text),
-                published_date=self._guess_pubdate(text),
-                title=text[:120],
-                full_text=text,
+                publication=publication,
+                published_date=published,
+                title=body[:140],
+                full_text=body,
                 url=(BASE + link["href"]) if link and link["href"].startswith("/")
-                    else (link["href"] if link else None),
+                    else None,
                 **fields,
             )
 
     @staticmethod
-    def _guess_publication(text):
-        m = re.match(r"([A-Z][A-Za-z.&'/ -]{3,60}?(?:,\s+The)?)\s+(?:[A-Z][a-z]+day|\d)",
-                     text)
-        return m.group(1).strip() if m else None
+    def _looks_like_date(s):
+        return bool(re.search(r"\d{4}|\d{1,2}/\d{1,2}", s or ""))
 
     @staticmethod
-    def _guess_pubdate(text):
-        m = re.search(r"[A-Z][a-z]+day,\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}", text)
-        return m.group() if m else None
-
-    @staticmethod
-    def _next_postback(soup, page_no):
-        """Find the __doPostBack target for the given page number link."""
-        for a in soup.select("a[href*='__doPostBack']"):
-            if a.get_text(strip=True) == str(page_no):
-                m = re.search(r"__doPostBack\('([^']+)','([^']*)'\)", a["href"])
-                if m:
-                    return m.group(1), m.group(2)
-        return None
+    def _page_info(soup):
+        m = re.search(r"Page\s+(\d+)\s+of\s+(\d+)", soup.get_text(" ", strip=True), re.I)
+        return (int(m.group(1)), int(m.group(2))) if m else (None, None)
