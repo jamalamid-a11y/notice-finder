@@ -1,4 +1,4 @@
-"""Scraper registry. Add a site by importing it and listing it in SCRAPERS."""
+undefined"""Scraper registry. Add a site by importing it and listing it in SCRAPERS."""
 
 from .virginia import VirginiaScraper
 from .html_table import HtmlTableScraper
