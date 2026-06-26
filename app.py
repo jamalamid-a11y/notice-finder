@@ -100,15 +100,17 @@ def run_refresh(source_id=None, max_pages=100):
 
 # --- query ------------------------------------------------------------------
 
-def query(source=None, dfrom=None, dto=None, q=None, county=None, state=None):
+def query(source=None, dfrom=None, dto=None, q=None, counties=None, state=None):
     sql = "SELECT * FROM notices WHERE 1=1"
     args = []
     if source:
         sql += " AND source=?"; args.append(source)
     if state:
         sql += " AND state=?"; args.append(state)
-    if county:
-        sql += " AND county LIKE ?"; args.append(f"%{county}%")
+    counties = [c for c in (counties or []) if c]
+    if counties:
+        sql += " AND county IN (%s)" % ",".join("?" * len(counties))
+        args += counties
     if dfrom:
         sql += " AND sale_date>=?"; args.append(dfrom)
     if dto:
@@ -134,12 +136,16 @@ def index():
 def api_notices():
     rows = query(request.args.get("source"), request.args.get("from"),
                  request.args.get("to"), request.args.get("q"),
-                 request.args.get("county"), request.args.get("state"))
+                 request.args.getlist("county"), request.args.get("state"))
     everything = query()
-    counties = sorted({r["county"] for r in everything if r.get("county")})
     states = sorted({r["state"] for r in everything if r.get("state")})
+    by_state = {}
+    for r in everything:
+        if r.get("state") and r.get("county"):
+            by_state.setdefault(r["state"], set()).add(r["county"])
+    counties_by_state = {s: sorted(v) for s, v in by_state.items()}
     return jsonify({"status": _status, "count": len(rows), "notices": rows,
-                    "counties": counties, "states": states})
+                    "states": states, "counties_by_state": counties_by_state})
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -159,7 +165,7 @@ def api_status():
 def export_csv():
     rows = query(request.args.get("source"), request.args.get("from"),
                  request.args.get("to"), request.args.get("q"),
-                 request.args.get("county"), request.args.get("state"))
+                 request.args.getlist("county"), request.args.get("state"))
     cols = ["source", "publication", "sale_date", "sale_time",
             "property_address", "county", "state", "court_location",
             "published_date", "url"]
