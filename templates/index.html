@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gavel — the DMV foreclosure &amp; trustee-sale index</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --bg:#F5F7FA; --surface:#FFFFFF; --panel:#FBFCFE; --line:#E6EAF0; --line-2:#D6DCE6;
+  --ink:#0E1726; --muted:#5B6676; --faint:#8A94A6;
+  --brand:#1E4FD8; --brand-d:#1741BC; --brand-soft:#EEF3FF; --brand-ring:#C9D8FF;
+  --good:#0E9F6E; --good-soft:#E6F6EF; --amber:#B45309; --amber-soft:#FDF3E6; --danger:#DC2626;
+  --shadow-sm:0 1px 2px rgba(16,25,40,.05),0 1px 3px rgba(16,25,40,.06);
+  --shadow-md:0 6px 20px rgba(16,25,40,.08);
+  --shadow-lg:0 20px 48px rgba(16,25,40,.16);
+  --r:12px; --r-lg:16px;
+}
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5;}
+a{color:inherit;text-decoration:none;}
+button,input,select{font-family:inherit;}
+::selection{background:var(--brand-ring);}
+.wrap{max-width:1200px;margin:0 auto;padding:0 24px;}
+.serif{font-family:'Fraunces',Georgia,serif;}
+.gv-hidden{display:none !important;}
+@keyframes gv-fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+@keyframes spin{to{transform:rotate(360deg);}}
+.fade{animation:gv-fade .35s ease both;}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid transparent;border-radius:10px;font-weight:600;font-size:14.5px;cursor:pointer;padding:11px 18px;transition:.15s;white-space:nowrap;}
+.btn-primary{background:var(--brand);color:#fff;box-shadow:var(--shadow-sm);}
+.btn-primary:hover{background:var(--brand-d);}
+.btn-ghost{background:var(--surface);color:var(--ink);border-color:var(--line-2);}
+.btn-ghost:hover{border-color:var(--faint);background:#fff;}
+.btn-dark{background:var(--ink);color:#fff;}
+.btn-dark:hover{background:#1b2740;}
+.btn-sm{padding:8px 12px;font-size:13px;border-radius:9px;}
+.btn-lg{padding:14px 24px;font-size:16px;border-radius:12px;}
+.btn:disabled{opacity:.55;cursor:default;}
+
+/* nav */
+.nav{position:sticky;top:0;z-index:60;background:rgba(245,247,250,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);}
+.nav-in{height:66px;display:flex;align-items:center;justify-content:space-between;gap:16px;}
+.brand{display:flex;align-items:center;gap:11px;cursor:pointer;}
+.brand-mark{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--brand),#3B6BF0);display:grid;place-items:center;box-shadow:0 4px 12px rgba(30,79,216,.35);}
+.brand-name{font-weight:800;font-size:19px;letter-spacing:-.02em;}
+.brand-sub{font-size:10px;font-weight:600;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-top:1px;}
+.nav-links{display:flex;align-items:center;gap:6px;}
+.nav-link{padding:8px 12px;border-radius:8px;font-weight:500;font-size:14px;color:var(--muted);cursor:pointer;}
+.nav-link:hover{color:var(--ink);background:var(--surface);}
+.pill-status{font-size:11px;font-weight:600;letter-spacing:.02em;color:var(--faint);display:flex;align-items:center;gap:6px;}
+
+/* hero */
+.hero{padding:64px 0 40px;}
+.hero-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:56px;align-items:center;}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 13px;font-size:12.5px;font-weight:600;color:var(--muted);box-shadow:var(--shadow-sm);}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px var(--good-soft);}
+h1.hero-h{font-size:clamp(38px,5vw,60px);line-height:1.04;letter-spacing:-.03em;font-weight:800;margin:22px 0 18px;}
+.hero-h .accent{color:var(--brand);}
+.lede{font-size:clamp(16px,1.4vw,18.5px);color:var(--muted);max-width:540px;margin:0 0 30px;}
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
+.linklike{font-weight:600;font-size:14.5px;color:var(--brand);display:inline-flex;align-items:center;gap:6px;padding:11px 6px;}
+
+/* sample card */
+.ncard{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-md);overflow:hidden;}
+.ncard-top{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:var(--ink);color:#fff;}
+.ncard-top .t{font-size:11px;font-weight:700;letter-spacing:.13em;}
+.tag-live{font-size:10.5px;font-weight:700;letter-spacing:.1em;color:#8FE3B9;display:flex;align-items:center;gap:6px;}
+.ncard-body{padding:20px;}
+.kv-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 14px;padding-top:18px;margin-top:16px;border-top:1px dashed var(--line-2);}
+.kv .k{font-size:10.5px;font-weight:600;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;margin-bottom:5px;}
+.kv .v{font-size:15px;font-weight:700;}
+.ncard-foot{padding:12px 18px;border-top:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted);font-weight:500;}
+
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:56px;}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:22px 22px;box-shadow:var(--shadow-sm);}
+.stat .n{font-size:34px;font-weight:800;letter-spacing:-.02em;line-height:1;}
+.stat .l{font-size:12px;font-weight:600;letter-spacing:.03em;color:var(--muted);text-transform:uppercase;margin-top:8px;}
+
+/* sources strip */
+.sources{margin-top:34px;background:var(--ink);border-radius:var(--r-lg);padding:18px 22px;overflow:hidden;}
+.sources-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;}
+.src-pill{font-size:12.5px;font-weight:600;color:#C7D2E6;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);border-radius:999px;padding:6px 12px;}
+.src-lead{font-size:12px;font-weight:700;letter-spacing:.08em;color:#7CA0F0;text-transform:uppercase;}
+
+/* sections */
+.section{padding:76px 0;}
+.section.alt{background:var(--surface);border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+.kicker{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--brand);text-transform:uppercase;margin-bottom:14px;}
+h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;font-weight:800;margin:0;}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:44px;}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:26px 24px;box-shadow:var(--shadow-sm);}
+.step .num{width:34px;height:34px;border-radius:9px;background:var(--brand-soft);color:var(--brand);font-weight:800;display:grid;place-items:center;margin-bottom:18px;}
+.step h3{font-size:19px;font-weight:700;margin:0 0 8px;letter-spacing:-.01em;}
+.step p{margin:0;color:var(--muted);font-size:14.5px;}
+
+/* cta band */
+.cta{background:linear-gradient(135deg,var(--brand),#3A63E8);border-radius:22px;padding:52px 44px;color:#fff;display:flex;flex-wrap:wrap;gap:26px;align-items:center;justify-content:space-between;box-shadow:var(--shadow-md);}
+.cta h2{font-size:clamp(26px,3vw,38px);line-height:1.06;margin:0 0 10px;font-weight:800;letter-spacing:-.02em;}
+.cta p{margin:0;opacity:.92;max-width:440px;}
+.btn-oncta{background:#fff;color:var(--brand-d);}
+.btn-oncta:hover{background:#F3F6FF;}
+
+/* footer */
+.footer{border-top:1px solid var(--line);background:var(--surface);}
+.footer-in{padding:34px 0;display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;color:var(--muted);font-size:13px;}
+
+/* ===== INDEX (app) ===== */
+.app{display:grid;grid-template-columns:320px 1fr;gap:0;min-height:calc(100vh - 66px);}
+.rail{border-right:1px solid var(--line);background:var(--surface);padding:24px 22px;overflow-y:auto;}
+.rail-h{font-size:12px;font-weight:700;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;margin:0 0 18px;}
+.field{margin-bottom:18px;}
+.field > label{display:block;font-size:12px;font-weight:600;color:var(--ink);margin-bottom:7px;letter-spacing:.01em;}
+.inp{width:100%;padding:10px 12px;border:1px solid var(--line-2);border-radius:9px;background:#fff;font-size:14px;color:var(--ink);transition:.15s;}
+.inp:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-ring);}
+.seg{display:flex;gap:6px;}
+.seg button{flex:1;padding:8px 0;border:1px solid var(--line-2);background:#fff;border-radius:8px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;}
+.seg button.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+.cty-box{border:1px solid var(--line-2);border-radius:10px;overflow:hidden;background:#fff;}
+.cty-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border-bottom:1px solid var(--line);background:var(--panel);}
+.cty-all{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;cursor:pointer;user-select:none;}
+.cty-count{font-size:11px;font-weight:600;color:var(--brand);background:var(--brand-soft);border-radius:999px;padding:2px 8px;}
+.cty-list{max-height:190px;overflow-y:auto;padding:6px;}
+.cty-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;font-size:13.5px;cursor:pointer;}
+.cty-item:hover{background:var(--panel);}
+.cty-item input{accent-color:var(--brand);width:15px;height:15px;}
+.dates{display:flex;gap:10px;}
+.searchbar{position:sticky;bottom:-24px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 30%);padding-top:12px;margin-top:6px;}
+.btn-search{width:100%;padding:13px 0;font-size:15px;}
+.btn-reset{width:100%;margin-top:9px;background:none;border:1px solid var(--line-2);}
+
+.results{display:grid;grid-template-columns:1fr 1fr;min-width:0;}
+.res-col{border-right:1px solid var(--line);display:flex;flex-direction:column;background:var(--bg);min-width:0;}
+.res-head{position:sticky;top:66px;z-index:8;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 22px;background:rgba(245,247,250,.9);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);}
+.res-count{font-size:22px;font-weight:800;letter-spacing:-.01em;}
+.res-sub{font-size:13px;color:var(--muted);font-weight:500;}
+.res-list{overflow-y:auto;flex:1;padding:14px;}
+.rc{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px 16px;margin-bottom:11px;cursor:pointer;transition:.14s;box-shadow:var(--shadow-sm);}
+.rc:hover{border-color:var(--line-2);box-shadow:var(--shadow-md);transform:translateY(-1px);}
+.rc.sel{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-ring);}
+.rc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.rc-addr{font-size:16px;font-weight:700;letter-spacing:-.01em;line-height:1.25;}
+.rc-date{flex-shrink:0;font-size:12.5px;font-weight:700;color:var(--brand);background:var(--brand-soft);border-radius:8px;padding:5px 9px;white-space:nowrap;}
+.rc-place{font-size:13px;color:var(--muted);margin:5px 0 11px;}
+.rc-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.chip{font-size:11.5px;font-weight:600;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:4px 8px;display:inline-flex;gap:5px;align-items:center;}
+.rc-open{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--brand);border:1px solid var(--brand-ring);background:var(--brand-soft);border-radius:7px;padding:4px 10px;cursor:pointer;}
+.map-col{position:relative;min-height:60vh;background:#E9EEF5;}
+#gv-map{position:absolute;inset:0;}
+.map-badge{position:absolute;top:14px;left:14px;z-index:500;background:rgba(14,23,38,.92);color:#fff;border-radius:8px;padding:7px 12px;font-size:11.5px;font-weight:600;letter-spacing:.02em;pointer-events:none;}
+.sel-card{position:absolute;left:14px;right:14px;bottom:14px;z-index:500;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);overflow:hidden;}
+.gv-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;background:var(--brand);border:2px solid #fff;transform:rotate(-45deg);box-shadow:0 3px 8px rgba(16,25,40,.35);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.gv-pin.sel{background:var(--ink);transform:rotate(-45deg) scale(1.15);}
+.gv-pin span{transform:rotate(45deg);color:#fff;font:700 11px/1 'Inter';}
+
+/* detail */
+.detail{padding:26px 0 70px;}
+.back{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;margin-bottom:22px;}
+.detail-grid{display:grid;grid-template-columns:1.7fr 1fr;gap:30px;align-items:start;}
+.doc{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-md);overflow:hidden;}
+.doc-top{display:flex;align-items:center;justify-content:space-between;padding:14px 26px;background:var(--ink);color:#fff;}
+.doc-body{padding:32px 34px 36px;}
+.doc h1{font-size:clamp(26px,3vw,38px);line-height:1.08;letter-spacing:-.02em;margin:0 0 6px;font-weight:800;}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:24px 0 28px;}
+.fact{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px;}
+.fact .k{font-size:10.5px;font-weight:600;color:var(--faint);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;}
+.fact .v{font-size:15px;font-weight:700;}
+.doc-text{font-size:14.5px;line-height:1.75;color:#2B3543;white-space:pre-wrap;margin:0 0 18px;}
+.note{display:flex;gap:12px;align-items:flex-start;padding:15px 17px;border:1px solid var(--line);border-radius:11px;background:var(--panel);font-size:12.5px;color:var(--muted);}
+.aside-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow-sm);}
+
+/* ===== auth modal ===== */
+.overlay{position:fixed;inset:0;z-index:200;background:rgba(14,23,38,.5);backdrop-filter:blur(3px);display:grid;place-items:center;padding:20px;}
+.modal{width:100%;max-width:440px;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow-lg);overflow:hidden;}
+.modal-x{position:absolute;top:16px;right:18px;font-size:20px;color:var(--faint);cursor:pointer;background:none;border:none;}
+.modal-body{padding:34px 32px 30px;}
+.lock-badge{width:44px;height:44px;border-radius:12px;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;margin-bottom:18px;}
+.modal h3{font-size:22px;font-weight:800;letter-spacing:-.02em;margin:0 0 8px;}
+.modal p{color:var(--muted);font-size:14.5px;margin:0 0 22px;}
+.spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.5);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;}
+.msg-ok{background:var(--good-soft);color:var(--good);border:1px solid #BDE9D3;border-radius:10px;padding:12px 14px;font-size:13.5px;font-weight:500;}
+.msg-err{background:#FDECEC;color:var(--danger);border:1px solid #F6C9C9;border-radius:10px;padding:12px 14px;font-size:13.5px;}
+.lock-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--amber);background:var(--amber-soft);border:1px solid #F3D9AE;border-radius:999px;padding:3px 9px;}
+
+/* leaflet tweaks */
+.leaflet-container{background:#E9EEF5;font-family:'Inter';}
+.leaflet-popup-content-wrapper{border-radius:10px;border:1px solid var(--line);box-shadow:var(--shadow-md);}
+.leaflet-popup-content{margin:10px 13px;}
+
+@media (max-width:1000px){
+  .hero-grid{grid-template-columns:1fr;gap:34px;}
+  .stats{grid-template-columns:repeat(2,1fr);}
+  .steps{grid-template-columns:1fr;}
+  .app{grid-template-columns:1fr;}
+  .rail{border-right:none;border-bottom:1px solid var(--line);}
+  .results{grid-template-columns:1fr;}
+  .res-col{border-right:none;}
+  .map-col{min-height:52vh;}
+  .detail-grid{grid-template-columns:1fr;}
+}
+@media (max-width:560px){
+  .wrap{padding:0 16px;}
+  .stats{grid-template-columns:1fr 1fr;}
+  .nav-links .nav-link{display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<header class="nav">
+  <div class="wrap nav-in">
+    <div class="brand" id="brand">
+      <div class="brand-mark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m14 13-7.5 7.5c-.83.83-2.17.83-3 0 0 0 0 0 0 0a2.12 2.12 0 0 1 0-3L11 7"/><path d="m16 16 6-6"/><path d="m8 8 6-6"/><path d="m9 7 8 8"/><path d="m21 11-8-8"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Gavel</div>
+        <div class="brand-sub">Public Notice Index</div>
+      </div>
+    </div>
+    <div class="nav-links">
+      <span class="nav-link" id="nav-overview">Overview</span>
+      <a class="nav-link" href="#how">How it works</a>
+      <span class="pill-status" id="nav-status"></span>
+      <span id="nav-account" class="gv-hidden nav-link" style="font-weight:600;color:var(--ink);"></span>
+      <button class="btn btn-ghost btn-sm gv-hidden" id="nav-signout">Sign out</button>
+      <button class="btn btn-ghost btn-sm" id="nav-signin">Sign in</button>
+      <button class="btn btn-primary btn-sm" id="nav-open">Open the index →</button>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== LANDING ===================== -->
+<main id="view-landing" class="fade">
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot"></span> VA · MD · DC — updated daily</span>
+        <h1 class="hero-h">Every trustee sale in the DMV, <span class="accent">in one searchable index.</span></h1>
+        <p class="lede">Foreclosure and trustee-sale notices are scattered across two dozen law-firm pages, newspaper classifieds and public-notice portals. Gavel pulls them into a single, filterable, mapped index.</p>
+        <div class="hero-cta">
+          <button class="btn btn-primary btn-lg" id="hero-open">Open the index →</button>
+          <a class="linklike" href="#how">See how it works →</a>
+        </div>
+        <div id="gate-hint" style="margin-top:16px;"></div>
+      </div>
+      <div>
+        <div class="ncard">
+          <div class="ncard-top">
+            <span class="t">NOTICE OF TRUSTEE'S SALE</span>
+            <span class="tag-live"><span style="width:6px;height:6px;border-radius:50%;background:#8FE3B9;display:inline-block;"></span>LIVE</span>
+          </div>
+          <div class="ncard-body">
+            <div style="font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--faint);text-transform:uppercase;margin-bottom:8px;" id="samp-source">Filed · —</div>
+            <div class="serif" style="font-size:23px;font-weight:600;line-height:1.15;" id="samp-addr">—</div>
+            <div style="font-size:14px;color:var(--muted);margin-top:3px;" id="samp-place">—</div>
+            <div class="kv-grid">
+              <div class="kv"><div class="k">Sale date</div><div class="v" id="samp-date" style="color:var(--brand);">—</div></div>
+              <div class="kv"><div class="k">Time</div><div class="v" id="samp-time">—</div></div>
+              <div class="kv"><div class="k">County</div><div class="v" id="samp-county" style="font-size:14px;">—</div></div>
+              <div class="kv"><div class="k">State</div><div class="v" id="samp-state">—</div></div>
+            </div>
+          </div>
+          <div class="ncard-foot" id="samp-foot">loading active notices…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="stats" id="stats"></div>
+      <div class="sources">
+        <div class="sources-row" id="sources"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt" id="how">
+    <div class="wrap">
+      <div class="kicker">The method</div>
+      <h2 class="sh">Stop refreshing twenty tabs.<br>Watch one index instead.</h2>
+      <div class="steps">
+        <div class="step"><div class="num">1</div><h3>We pull the filings</h3><p>Every law-firm docket, newspaper classified and trustee page — scraped and normalized into one clean schema, automatically.</p></div>
+        <div class="step"><div class="num">2</div><h3>You filter &amp; map</h3><p>Narrow by state, one or many counties, source or sale date, then hit Search. Every match is plotted on a live map of the DMV.</p></div>
+        <div class="step"><div class="num">3</div><h3>Read the full notice</h3><p>Open any result for the complete filing — sale date, time, address and terms — reformatted for readability, with a link to the source.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap">
+      <div class="cta">
+        <div>
+          <h2>Open the index.<br>It's already loaded.</h2>
+          <p>Create a free verified account to unlock the full searchable index, map and notice details.</p>
+        </div>
+        <button class="btn btn-oncta btn-lg" id="cta-open">Get started →</button>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="wrap footer-in">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <strong style="letter-spacing:-.01em;color:var(--ink);">Gavel</strong>
+        <span>— an independent public-notice index. Not legal advice.</span>
+      </div>
+      <span>© 2026 · VA / MD / DC</span>
+    </div>
+  </footer>
+</main>
+
+<!-- ===================== INDEX (gated) ===================== -->
+<div id="view-index" class="gv-hidden fade">
+  <div class="wrap" style="max-width:1400px;">
+  <div class="app">
+    <aside class="rail">
+      <div class="rail-h">Filters</div>
+
+      <div class="field">
+        <label for="f-q">Search address / keyword</label>
+        <input class="inp" id="f-q" type="text" placeholder="e.g. Arlington, Kenwood Ave…">
+      </div>
+
+      <div class="field">
+        <label>State</label>
+        <div class="seg" id="seg-state"></div>
+      </div>
+
+      <div class="field">
+        <label>Counties</label>
+        <div class="cty-box">
+          <div class="cty-head">
+            <label class="cty-all"><input type="checkbox" id="cty-selectall"> Select all</label>
+            <span class="cty-count" id="cty-count">0 selected</span>
+          </div>
+          <div class="cty-list" id="cty-list"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="f-source">Source</label>
+        <select class="inp" id="f-source"></select>
+      </div>
+
+      <div class="field">
+        <label>Sale date range</label>
+        <div class="dates">
+          <input class="inp" id="f-from" type="date" aria-label="from">
+          <input class="inp" id="f-to" type="date" aria-label="to">
+        </div>
+      </div>
+
+      <div class="searchbar">
+        <button class="btn btn-primary btn-search" id="btn-search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          Search notices
+        </button>
+        <button class="btn btn-reset btn-sm" id="btn-reset">Reset filters</button>
+      </div>
+
+      <div style="border-top:1px solid var(--line);margin-top:20px;padding-top:18px;">
+        <label style="display:block;font-size:12px;font-weight:600;margin-bottom:9px;">Data</label>
+        <button class="btn btn-dark btn-sm" id="btn-refresh" style="width:100%;">↻ Pull latest notices</button>
+        <div id="refresh-note" style="font-size:11.5px;color:var(--muted);margin-top:9px;"></div>
+      </div>
+    </aside>
+
+    <div class="results">
+      <div class="res-col">
+        <div class="res-head">
+          <div>
+            <span class="res-count" id="res-count">0</span>
+            <span class="res-sub" id="res-sub"> notices</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-ghost btn-sm" id="res-sort">Sort · Date</button>
+            <button class="btn btn-dark btn-sm" id="res-export">Export CSV</button>
+          </div>
+        </div>
+        <div class="res-list" id="res-list"></div>
+      </div>
+      <div class="map-col">
+        <div id="gv-map"></div>
+        <div class="map-badge" id="map-badge">0 mapped</div>
+        <div class="sel-card gv-hidden" id="sel-card"></div>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- ===================== DETAIL (gated) ===================== -->
+<div id="view-detail" class="gv-hidden fade">
+  <div class="wrap detail">
+    <span class="back" id="detail-back">← Back to index</span>
+    <div class="detail-grid" id="detail-body"></div>
+  </div>
+</div>
+
+<!-- ===================== AUTH MODAL ===================== -->
+<div id="auth-overlay" class="overlay gv-hidden">
+  <div class="modal" style="position:relative;">
+    <button class="modal-x" id="auth-x">×</button>
+    <div class="modal-body">
+      <div class="lock-badge">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <h3>Verify your email to open the index</h3>
+      <p>Enter your email and we'll send a secure sign-in link. No password, no phone number — just click the link to verify and you're in.</p>
+      <div id="auth-form">
+        <input class="inp" id="auth-email" type="email" placeholder="you@example.com" style="margin-bottom:12px;">
+        <button class="btn btn-primary" id="auth-send" style="width:100%;">Send my sign-in link</button>
+      </div>
+      <div id="auth-msg" style="margin-top:14px;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   CONFIG — paste your free Supabase project values here.
+   (Project → Settings → API.) Until both are filled in, the
+   index stays open so the site keeps working; once set, the
+   email-verified login gate turns on automatically.
+   ========================================================= */
+const SUPABASE_URL = "https://qfulezsfkelcxxogrult.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_TvHgi9A7yR6YH-J9wtgp5g_QhKotpuB";
+
+const $ = s => document.querySelector(s);
+const esc = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const VALID_ST = new Set(['VA','MD','DC','WV','PA','DE','NC']);
+const isState = s => /^[A-Za-z]{2}$/.test((s||'').trim());
+const cleanState = s => { s=(s||'').trim().toUpperCase(); return isState(s)?s:''; };
+
+const CENTROIDS = {
+  'VA|fairfax':[38.85,-77.30],'VA|arlington':[38.88,-77.10],'VA|alexandria':[38.82,-77.09],
+  'VA|loudoun':[39.09,-77.63],'VA|prince william':[38.70,-77.47],'VA|stafford':[38.42,-77.41],
+  'VA|spotsylvania':[38.20,-77.65],'VA|fredericksburg':[38.30,-77.46],'VA|fauquier':[38.74,-77.80],
+  'VA|culpeper':[38.47,-77.99],'VA|richmond':[37.54,-77.44],'VA|henrico':[37.60,-77.40],
+  'VA|chesterfield':[37.38,-77.51],'VA|hanover':[37.76,-77.37],'VA|prince george':[37.22,-77.29],
+  'VA|chesapeake':[36.77,-76.29],'VA|virginia beach':[36.85,-75.98],'VA|norfolk':[36.85,-76.29],
+  'VA|newport news':[37.09,-76.52],'VA|hampton':[37.05,-76.36],'VA|suffolk':[36.73,-76.58],
+  'VA|portsmouth':[36.84,-76.35],'VA|williamsburg':[37.27,-76.71],'VA|york':[37.24,-76.54],
+  'VA|albemarle':[38.03,-78.50],'VA|charlottesville':[38.03,-78.48],'VA|clarke':[39.11,-77.99],
+  'VA|warren':[38.90,-78.20],'VA|orange':[38.25,-78.11],
+  'MD|montgomery':[39.14,-77.20],"MD|prince george's":[38.83,-76.85],'MD|prince georges':[38.83,-76.85],
+  'MD|anne arundel':[38.97,-76.55],'MD|baltimore city':[39.29,-76.61],'MD|baltimore':[39.40,-76.60],
+  'MD|howard':[39.25,-76.93],'MD|charles':[38.50,-77.00],'MD|frederick':[39.41,-77.41],
+  'MD|carroll':[39.56,-77.02],'MD|harford':[39.54,-76.30],'MD|calvert':[38.53,-76.53],
+  "MD|st. mary's":[38.29,-76.64],'MD|washington':[39.60,-77.81],
+  'DC|washington':[38.905,-77.03],'DC|district of columbia':[38.905,-77.03]
+};
+const DMV=[38.9,-77.0];
+function centroid(n,i){
+  const st=cleanState(n.state);
+  const c=(n.county||'').toLowerCase().replace(/\s+(county|city)$/,'').trim();
+  let hit=CENTROIDS[st+'|'+c];
+  if(!hit && st==='DC') hit=DMV.slice();
+  if(!hit){ const base = st==='MD'?[39.0,-76.9]:[37.9,-78.0]; const a=((i*47)%360)*Math.PI/180; hit=[base[0]+Math.cos(a)*.35,base[1]+Math.sin(a)*.6]; }
+  const a=((i*61)%360)*Math.PI/180;
+  return [hit[0]+Math.cos(a)*.018, hit[1]+Math.sin(a)*.024];
+}
+
+const S = { view:'landing', all:[], rows:[], sort:'date', selectedId:null, detailId:null,
+  f:{q:'',state:'all',counties:new Set(),source:'all',from:'',to:''}, poll:null, session:null };
+
+const fmtDate=d=>{ if(!d) return '—'; const p=String(d).split('-'); return p.length===3?p[1]+'/'+p[2]+'/'+p[0]:d; };
+const fmtLong=d=>{ if(!d) return ''; const p=String(d).split('-'); const M=['January','February','March','April','May','June','July','August','September','October','November','December']; return p.length===3?M[+p[1]-1]+' '+(+p[2])+', '+p[0]:d; };
+const placeOf=n=>[n.county,cleanState(n.state)].filter(Boolean).join(', ');
+const srcOf=n=>n.publication||n.source||'Public notice';
+
+/* ---------- Supabase auth ---------- */
+let supa=null;
+const authEnabled=()=> !!(SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase);
+function initAuth(){
+  if(!authEnabled()){ paintAuthState(); return; }
+  supa=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+  supa.auth.getSession().then(({data})=>{ S.session=data.session; paintAuthState(); });
+  supa.auth.onAuthStateChange((_e,session)=>{
+    const was=!!S.session; S.session=session; paintAuthState();
+    if(!was && session){ closeAuth(); openIndex(); }
+  });
+}
+const canAccess=()=> !authEnabled() || !!S.session;
+function paintAuthState(){
+  const authed=!!S.session;
+  $('#nav-signin').classList.toggle('gv-hidden', authed || !authEnabled());
+  $('#nav-signout').classList.toggle('gv-hidden', !authed);
+  const acc=$('#nav-account'); acc.classList.toggle('gv-hidden', !authed);
+  if(authed && S.session.user) acc.textContent=S.session.user.email;
+  const hint=$('#gate-hint');
+  if(authEnabled() && !authed){ hint.innerHTML='<span class="lock-chip">🔒 Free account required to open the index</span>'; }
+  else hint.innerHTML='';
+}
+function openAuthModal(){ $('#auth-overlay').classList.remove('gv-hidden'); $('#auth-msg').innerHTML=''; setTimeout(()=>$('#auth-email').focus(),50); }
+function closeAuth(){ $('#auth-overlay').classList.add('gv-hidden'); }
+async function sendLink(){
+  const email=($('#auth-email').value||'').trim();
+  const msg=$('#auth-msg');
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg.innerHTML='<div class="msg-err">Please enter a valid email address.</div>'; return; }
+  if(!authEnabled()){ msg.innerHTML='<div class="msg-err">Sign-in isn\'t configured yet. (Add your Supabase keys to enable it.)</div>'; return; }
+  const btn=$('#auth-send'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Sending…';
+  try{
+    const { error } = await supa.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.origin } });
+    if(error) throw error;
+    msg.innerHTML='<div class="msg-ok">✓ Check your inbox — we sent a secure sign-in link to <b>'+esc(email)+'</b>. Click it to verify and open the index.</div>';
+    $('#auth-form').style.display='none';
+  }catch(e){ msg.innerHTML='<div class="msg-err">'+esc(e.message||'Could not send link. Try again.')+'</div>'; }
+  btn.disabled=false; btn.innerHTML='Send my sign-in link';
+}
+
+/* ---------- data load ---------- */
+async function loadData(){
+  const d=await fetch('/api/notices').then(r=>r.json());
+  S.all=d.notices||[]; renderStatus(d.status); buildLanding(d);
+}
+function renderStatus(st){
+  const el=$('#nav-status'); if(!st){el.textContent='';return;}
+  if(st.running){ el.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:var(--amber);display:inline-block;"></span> Indexing…'; if(!S.poll) S.poll=setInterval(pollStatus,4000); }
+  else { if(S.poll){clearInterval(S.poll);S.poll=null;} el.textContent= st.last_run?('Updated '+st.last_run.replace('T',' ').slice(5,16)):''; }
+}
+async function pollStatus(){ try{ const s=await fetch('/api/status').then(r=>r.json()); renderStatus(s); if(!s.running){ const d=await fetch('/api/notices').then(r=>r.json()); S.all=d.notices||[]; buildLanding(d); if(S.view==='index'){buildFilters();applySearch();} } }catch(e){} }
+
+function buildLanding(d){
+  const notices=S.all;
+  const sources=[...new Set(notices.map(srcOf))];
+  const states=[...new Set(notices.map(n=>cleanState(n.state)).filter(Boolean))];
+  const stateLabel = states.slice(0,4).join(' · ')||'VA · MD · DC';
+  const stats=[
+    {n:(d.count||notices.length).toLocaleString(), l:'Active notices'},
+    {n:String(sources.length), l:'Sources merged'},
+    {n:String(states.length||3), l:'States ('+stateLabel+')'},
+    {n:'Daily', l:'Refresh cadence'}
+  ];
+  $('#stats').innerHTML=stats.map(s=>`<div class="stat"><div class="n">${esc(s.n)}</div><div class="l">${esc(s.l)}</div></div>`).join('');
+  $('#sources').innerHTML='<span class="src-lead">Now indexing</span>'+sources.slice(0,16).map(s=>`<span class="src-pill">${esc(s)}</span>`).join('')+'<span class="src-pill" style="color:#7CA0F0;">+ more</span>';
+
+  const today=new Date().toISOString().slice(0,10);
+  const up=notices.filter(n=>n.sale_date&&n.sale_date>=today&&n.property_address).sort((a,b)=>a.sale_date.localeCompare(b.sale_date));
+  const s=up[0]||notices.find(n=>n.property_address)||notices[0];
+  if(s){
+    $('#samp-source').textContent='Filed · '+srcOf(s);
+    $('#samp-addr').textContent=s.property_address||'(see full notice)';
+    $('#samp-place').textContent=placeOf(s)||'—';
+    $('#samp-date').textContent=fmtDate(s.sale_date);
+    $('#samp-time').textContent=s.sale_time||'—';
+    $('#samp-county').textContent=s.county||'—';
+    $('#samp-state').textContent=cleanState(s.state)||'—';
+    const cty=s.county||''; const cnt=notices.filter(n=>n.county===cty).length;
+    $('#samp-foot').textContent= cty?(cnt+' active notice'+(cnt===1?'':'s')+' in '+cty):(notices.length+' active notices indexed');
+  }
+}
+
+/* ---------- index filters ---------- */
+function buildFilters(){
+  // state segmented control
+  const states=['all',...[...new Set(S.all.map(n=>cleanState(n.state)).filter(Boolean))].sort()];
+  const seg=$('#seg-state'); seg.innerHTML='';
+  states.forEach(v=>{ const b=document.createElement('button'); b.textContent=v==='all'?'All':v; if(S.f.state===v)b.className='on';
+    b.onclick=()=>{S.f.state=v; [...seg.children].forEach(c=>c.classList.remove('on')); b.classList.add('on'); rebuildCounties();};
+    seg.appendChild(b); });
+  // source
+  const sources=[...new Set(S.all.map(srcOf))].sort();
+  $('#f-source').innerHTML=['all',...sources].map(o=>`<option value="${esc(o)}">${o==='all'?'All sources':esc(o)}</option>`).join('');
+  $('#f-source').value=S.f.source;
+  rebuildCounties();
+}
+function countiesForState(){
+  const st=S.f.state;
+  const set=new Set();
+  S.all.forEach(n=>{ if(!n.county) return; if(st==='all'||cleanState(n.state)===st) set.add(n.county); });
+  return [...set].sort((a,b)=>a.localeCompare(b));
+}
+function rebuildCounties(){
+  const list=countiesForState();
+  // drop selections no longer valid
+  S.f.counties=new Set([...S.f.counties].filter(c=>list.includes(c)));
+  const box=$('#cty-list');
+  box.innerHTML=list.length?list.map(c=>{
+    const on=S.f.counties.has(c);
+    return `<label class="cty-item"><input type="checkbox" data-cty="${esc(c)}" ${on?'checked':''}> ${esc(c)}</label>`;
+  }).join(''):'<div style="padding:14px;color:var(--faint);font-size:13px;">No counties for this state.</div>';
+  box.querySelectorAll('input[data-cty]').forEach(inp=>inp.onchange=()=>{ inp.checked?S.f.counties.add(inp.dataset.cty):S.f.counties.delete(inp.dataset.cty); paintCtyCount(); });
+  paintCtyCount();
+}
+function paintCtyCount(){
+  const total=countiesForState().length, sel=S.f.counties.size;
+  $('#cty-count').textContent = sel? (sel+' selected') : (total+' available');
+  $('#cty-selectall').checked = total>0 && sel===total;
+  $('#cty-selectall').indeterminate = sel>0 && sel<total;
+}
+
+function applySearch(){
+  const f=S.f;
+  let rows=S.all.filter(n=>{
+    if(f.state!=='all' && cleanState(n.state)!==f.state) return false;
+    if(f.counties.size && !f.counties.has(n.county)) return false;
+    if(f.source!=='all' && srcOf(n)!==f.source) return false;
+    if(f.q){ const hay=((n.property_address||'')+' '+(n.county||'')+' '+placeOf(n)+' '+(n.full_text||'')).toLowerCase(); if(!hay.includes(f.q.toLowerCase())) return false; }
+    if(f.from && (!n.sale_date||n.sale_date<f.from)) return false;
+    if(f.to && (!n.sale_date||n.sale_date>f.to)) return false;
+    return true;
+  });
+  rows.sort((a,b)=> S.sort==='source'?srcOf(a).localeCompare(srcOf(b)):(a.sale_date||'9999').localeCompare(b.sale_date||'9999'));
+  S.rows=rows; S.selectedId=null; $('#sel-card').classList.add('gv-hidden');
+  renderResults(); LASTIDS=''; updateMap();
+}
+function renderResults(){
+  const rows=S.rows;
+  $('#res-count').textContent=rows.length.toLocaleString();
+  const stTxt = S.f.state==='all'?'all states':S.f.state;
+  const ctyTxt = S.f.counties.size? (' · '+S.f.counties.size+' counties'):'';
+  $('#res-sub').textContent=' notices · '+stTxt+ctyTxt;
+  $('#map-badge').textContent=Math.min(rows.length,400).toLocaleString()+' mapped';
+  const list=$('#res-list');
+  if(!rows.length){ list.innerHTML='<div style="padding:44px 14px;text-align:center;color:var(--faint);font-size:14px;">No notices match these filters.<br>Try widening your search.</div>'; return; }
+  list.innerHTML=rows.map((r,i)=>{
+    const sel=String(r.id)===String(S.selectedId);
+    return `<div class="rc ${sel?'sel':''}" data-id="${r.id}">
+      <div class="rc-top">
+        <div class="rc-addr">${esc(r.property_address||'(see full notice)')}</div>
+        <div class="rc-date">${esc(fmtDate(r.sale_date))}</div>
+      </div>
+      <div class="rc-place">${esc(placeOf(r)||'—')}</div>
+      <div class="rc-tags">
+        <span class="chip">🕑 ${esc(r.sale_time||'time TBD')}</span>
+        <span class="chip">§ ${esc(srcOf(r))}</span>
+        <span class="rc-open" data-open="${r.id}">Open →</span>
+      </div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.rc').forEach(el=>el.onclick=()=>selectRow(el.dataset.id));
+  list.querySelectorAll('.rc-open').forEach(el=>el.onclick=e=>{e.stopPropagation();gotoDetail(el.dataset.open);});
+}
+
+/* ---------- map ---------- */
+let MAP=null,MARKERS={},LASTIDS='';
+function ensureMap(){ const el=$('#gv-map'); if(!el||!window.L) return; if(!MAP){ MAP=L.map(el,{zoomControl:true,attributionControl:false}).setView(DMV,8); L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd'}).addTo(MAP); setTimeout(()=>MAP&&MAP.invalidateSize(),120);} }
+function updateMap(){
+  if(S.view!=='index') return; ensureMap(); if(!MAP) return;
+  const rows=S.rows.slice(0,400); const ids=rows.map(r=>r.id).join(',')+'|'+S.selectedId;
+  if(ids===LASTIDS) return;
+  Object.values(MARKERS).forEach(m=>MAP.removeLayer(m)); MARKERS={};
+  rows.forEach((r,i)=>{ const ll=centroid(r,i), sel=String(r.id)===String(S.selectedId);
+    const icon=L.divIcon({className:'',html:'<div class="gv-pin'+(sel?' sel':'')+'"><span>'+(i+1)+'</span></div>',iconSize:[26,26],iconAnchor:[13,26]});
+    const m=L.marker(ll,{icon}).addTo(MAP);
+    m.bindPopup('<b>'+esc(r.property_address||'Notice')+'</b><br><span style="color:#5B6676;font-size:12px;">'+esc(placeOf(r))+' · '+esc(fmtDate(r.sale_date))+'</span>');
+    m.on('click',()=>selectRow(r.id)); MARKERS[r.id]=m; });
+  LASTIDS=ids;
+  if(rows.length && !S.selectedId){ try{MAP.fitBounds(rows.map((r,i)=>centroid(r,i)),{padding:[40,40],maxZoom:10});}catch(e){} }
+}
+function selectRow(id){
+  S.selectedId=(String(S.selectedId)===String(id))?null:id; renderResults(); updateMap();
+  const r=S.rows.find(x=>String(x.id)===String(id)); const card=$('#sel-card');
+  if(S.selectedId&&r){ const idx=S.rows.indexOf(r); if(MARKERS[r.id]){MAP.setView(centroid(r,idx),12,{animate:true});MARKERS[r.id].openPopup();}
+    card.classList.remove('gv-hidden');
+    card.innerHTML=`<div class="doc-top" style="padding:11px 16px;"><span style="font-size:11px;font-weight:700;letter-spacing:.1em;">TRUSTEE'S SALE</span><button id="sel-x" style="background:none;border:none;color:#cbd5e1;font-size:17px;cursor:pointer;line-height:1;">×</button></div>
+      <div style="padding:16px 18px;">
+        <div class="serif" style="font-size:20px;font-weight:600;line-height:1.15;">${esc(r.property_address||'(see full notice)')}</div>
+        <div style="font-size:13px;color:var(--muted);margin:4px 0 14px;">${esc(placeOf(r))}</div>
+        <div class="facts" style="margin:0 0 14px;grid-template-columns:repeat(4,1fr);">
+          <div class="fact"><div class="k">Date</div><div class="v" style="color:var(--brand);font-size:13px;">${esc(fmtDate(r.sale_date))}</div></div>
+          <div class="fact"><div class="k">Time</div><div class="v" style="font-size:13px;">${esc(r.sale_time||'—')}</div></div>
+          <div class="fact"><div class="k">County</div><div class="v" style="font-size:12px;">${esc(r.county||'—')}</div></div>
+          <div class="fact"><div class="k">State</div><div class="v" style="font-size:13px;">${esc(cleanState(r.state)||'—')}</div></div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span style="font-size:12px;color:var(--muted);">Filed by · ${esc(srcOf(r))}</span>
+          <button class="btn btn-primary btn-sm" id="sel-full">Full notice →</button>
+        </div>
+      </div>`;
+    $('#sel-x').onclick=()=>{S.selectedId=null;renderResults();updateMap();card.classList.add('gv-hidden');};
+    $('#sel-full').onclick=()=>gotoDetail(r.id);
+  } else card.classList.add('gv-hidden');
+}
+
+/* ---------- detail ---------- */
+function gotoDetail(id){
+  const r=S.all.find(x=>String(x.id)===String(id)); if(!r) return;
+  S.detailId=id; setView('detail'); window.scrollTo(0,0);
+  const county=r.county||''; const nearby=S.all.filter(x=>x.id!==r.id&&x.county&&x.county===county).slice(0,3);
+  const hasFull=r.full_text&&r.full_text.trim().length>40;
+  const terms=hasFull?esc(r.full_text.trim()):`In execution of a Deed of Trust recorded among the land records of ${esc(county||'the jurisdiction')}, default having occurred in the payment of the note thereby secured, the substitute trustees will offer for sale at public auction the property located at ${esc(r.property_address||'the subject property')}${placeOf(r)?', '+esc(placeOf(r)):''}. The sale will be held on ${esc(fmtLong(r.sale_date)||'the scheduled date')}${r.sale_time?' at '+esc(r.sale_time):''}. The property will be sold "as is," subject to all liens, encumbrances, conditions, easements and restrictions of record.`;
+  const facts=[['Sale date',fmtDate(r.sale_date),'var(--brand)'],['Time',r.sale_time||'—',''],['County',r.county||'—',''],['Source',srcOf(r),'']];
+  $('#detail-body').innerHTML=`
+    <div class="doc">
+      <div class="doc-top"><span style="font-size:11px;font-weight:700;letter-spacing:.14em;">NOTICE OF TRUSTEE'S SALE</span><span style="font-size:11px;font-weight:700;color:#8FB0FF;">${esc(cleanState(r.state))}</span></div>
+      <div class="doc-body">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--faint);text-transform:uppercase;margin-bottom:10px;">Filed · ${esc(srcOf(r))}${r.published_date?' · pub '+esc(fmtDate(r.published_date)):''}</div>
+        <h1 class="serif">${esc(r.property_address||'(see full notice)')}</h1>
+        <div style="font-size:15px;color:var(--muted);">${esc(placeOf(r)||'—')}</div>
+        <div class="facts">${facts.map(c=>`<div class="fact"><div class="k">${c[0]}</div><div class="v" style="${c[2]?'color:'+c[2]+';':''}font-size:14px;line-height:1.3;">${esc(c[1])}</div></div>`).join('')}</div>
+        <h3 style="font-size:16px;font-weight:700;margin:0 0 10px;">${hasFull?'Full notice':'Terms of sale'}</h3>
+        <p class="doc-text">${terms}</p>
+        <div class="note"><span style="font-size:16px;">⚖️</span><span>This is a reformatted view of the public filing. Always confirm terms against the original notice before bidding. Gavel is not legal advice.</span></div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div class="aside-card" style="overflow:hidden;">
+        <div id="gv-map-detail" style="height:230px;"></div>
+        <div style="padding:11px 15px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:12px;color:var(--muted);">${esc(r.county||'')} · ${esc(cleanState(r.state))}</span>
+          ${r.url?`<a href="${esc(r.url)}" target="_blank" rel="noopener" style="font-size:12px;font-weight:600;color:var(--brand);">Source ↗</a>`:''}
+        </div>
+      </div>
+      <div class="aside-card" style="padding:20px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;">Filed by</div>
+        <div style="font-size:18px;font-weight:700;">${esc(srcOf(r))}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:4px;">Substitute trustee · ${esc(cleanState(r.state))}${r.court_location?'<br>'+esc(r.court_location):''}</div>
+      </div>
+      ${r.url?`<a class="btn btn-primary" href="${esc(r.url)}" target="_blank" rel="noopener" style="width:100%;">View original source ↗</a>`:''}
+      <button class="btn btn-ghost" id="detail-export" style="width:100%;">Export index to CSV</button>
+      ${nearby.length?`<div class="aside-card" style="padding:18px;">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;">Nearby in ${esc(r.county||'this county')}</div>
+        ${nearby.map(nb=>`<button class="nb" data-id="${nb.id}" style="width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:8px;cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center;">
+          <span><span style="display:block;font-weight:700;font-size:14.5px;">${esc(nb.property_address||'Notice')}</span><span style="display:block;font-size:12px;color:var(--muted);margin-top:3px;">${esc(fmtDate(nb.sale_date))} · ${esc(nb.sale_time||'—')}</span></span>
+          <span style="font-size:12px;font-weight:700;color:var(--brand);flex-shrink:0;">${esc(cleanState(nb.state))}</span></button>`).join('')}
+      </div>`:''}
+    </div>`;
+  $('#detail-body').querySelectorAll('.nb').forEach(el=>el.onclick=()=>gotoDetail(el.dataset.id));
+  const de=$('#detail-export'); if(de) de.onclick=exportCsv;
+  setTimeout(()=>{ const el=$('#gv-map-detail'); if(el&&window.L){ const ll=centroid(r,0); const dm=L.map(el,{zoomControl:false,attributionControl:false,dragging:false,scrollWheelZoom:false}).setView(ll,12); L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd'}).addTo(dm); L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="gv-pin sel"><span>●</span></div>',iconSize:[26,26],iconAnchor:[13,26]})}).addTo(dm); setTimeout(()=>dm.invalidateSize(),120);} },60);
+}
+
+function exportCsv(){
+  const head=['sale_date','sale_time','property_address','county','state','source','court_location','url'];
+  const lines=S.rows.map(r=>[r.sale_date,r.sale_time,r.property_address,r.county,cleanState(r.state),srcOf(r),r.court_location,r.url].map(v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"').join(','));
+  const blob=new Blob([head.join(',')+'\n'+lines.join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='gavel-notices.csv';a.click();
+}
+
+/* ---------- views + gate ---------- */
+function setView(v){
+  S.view=v;
+  $('#view-landing').classList.toggle('gv-hidden',v!=='landing');
+  $('#view-index').classList.toggle('gv-hidden',v!=='index');
+  $('#view-detail').classList.toggle('gv-hidden',v!=='detail');
+  const appOn=v==='index'||v==='detail';
+  $('#nav-open').textContent = v==='landing'?'Open the index →':'← Overview';
+  if(v==='index') setTimeout(()=>{ if(MAP) MAP.invalidateSize(); LASTIDS=''; updateMap(); },80);
+}
+let indexReady=false;
+function openIndex(){ if(!canAccess()){ openAuthModal(); return; } setView('index'); window.scrollTo(0,0); if(!indexReady){ buildFilters(); applySearch(); indexReady=true; } }
+function toggleIndexNav(){ if(S.view==='landing') openIndex(); else setView('landing'); }
+
+/* ---------- wire ---------- */
+function bind(){
+  $('#brand').onclick=()=>{setView('landing');window.scrollTo(0,0);};
+  $('#nav-overview').onclick=()=>{setView('landing');window.scrollTo(0,0);};
+  $('#nav-open').onclick=toggleIndexNav;
+  $('#hero-open').onclick=openIndex;
+  $('#cta-open').onclick=openIndex;
+  $('#detail-back').onclick=()=>{setView('index');window.scrollTo(0,0);};
+  $('#nav-signin').onclick=openAuthModal;
+  $('#nav-signout').onclick=async()=>{ if(supa){await supa.auth.signOut();} S.session=null; paintAuthState(); setView('landing'); };
+  $('#auth-x').onclick=closeAuth;
+  $('#auth-overlay').onclick=e=>{ if(e.target===$('#auth-overlay')) closeAuth(); };
+  $('#auth-send').onclick=sendLink;
+  $('#auth-email').addEventListener('keydown',e=>{ if(e.key==='Enter') sendLink(); });
+  $('#btn-search').onclick=()=>{ S.f.q=$('#f-q').value.trim(); S.f.source=$('#f-source').value; S.f.from=$('#f-from').value; S.f.to=$('#f-to').value; applySearch(); };
+  $('#f-q').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#btn-search').click(); });
+  $('#btn-reset').onclick=()=>{ S.f={q:'',state:'all',counties:new Set(),source:'all',from:'',to:''}; $('#f-q').value='';$('#f-from').value='';$('#f-to').value=''; buildFilters(); applySearch(); };
+  $('#cty-selectall').onchange=e=>{ const all=countiesForState(); S.f.counties = e.target.checked? new Set(all): new Set(); rebuildCounties(); };
+  $('#res-sort').onclick=()=>{ S.sort=S.sort==='date'?'source':'date'; $('#res-sort').textContent='Sort · '+(S.sort==='date'?'Date':'Source'); applySearch(); };
+  $('#res-export').onclick=exportCsv;
+  $('#btn-refresh').onclick=async()=>{ $('#refresh-note').textContent='Refresh started — this can take a few minutes.'; try{await fetch('/api/refresh',{method:'POST'});}catch(e){} renderStatus({running:true}); };
+}
+
+bind(); initAuth();
+loadData().catch(e=>{ $('#samp-foot').textContent='Could not load notices.'; console.error(e); });
+</script>
+</body>
+</html>
