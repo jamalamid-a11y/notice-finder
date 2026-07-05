@@ -333,7 +333,13 @@ h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;fo
 
       <div class="field">
         <label>State</label>
-        <div class="seg" id="seg-state"></div>
+        <div class="cty-box">
+          <div class="cty-head">
+            <label class="cty-all"><input type="checkbox" id="st-selectall"> All states</label>
+            <span class="cty-count" id="st-count">0 selected</span>
+          </div>
+          <div class="cty-list" id="st-list"></div>
+        </div>
       </div>
 
       <div class="field">
@@ -479,7 +485,7 @@ function centroid(n,i){
 }
 
 const S = { view:'landing', all:[], rows:[], sort:'date', selectedId:null, detailId:null,
-  f:{q:'',state:'all',counties:new Set(),source:'all',from:'',to:''}, poll:null, session:null };
+  f:{q:'',states:new Set(),counties:new Set(),source:'all',from:'',to:''}, poll:null, session:null };
 
 const fmtDate=d=>{ if(!d) return '—'; const p=String(d).split('-'); return p.length===3?p[1]+'/'+p[2]+'/'+p[0]:d; };
 const fmtLong=d=>{ if(!d) return ''; const p=String(d).split('-'); const M=['January','February','March','April','May','June','July','August','September','October','November','December']; return p.length===3?M[+p[1]-1]+' '+(+p[2])+', '+p[0]:d; };
@@ -611,22 +617,45 @@ function applyGate(){
 
 /* ---------- index filters ---------- */
 function buildFilters(){
-  // state segmented control
-  const states=['all',...[...new Set(S.all.map(n=>cleanState(n.state)).filter(Boolean))].sort()];
-  const seg=$('#seg-state'); seg.innerHTML='';
-  states.forEach(v=>{ const b=document.createElement('button'); b.textContent=v==='all'?'All':v; if(S.f.state===v)b.className='on';
-    b.onclick=()=>{S.f.state=v; [...seg.children].forEach(c=>c.classList.remove('on')); b.classList.add('on'); rebuildCounties();};
-    seg.appendChild(b); });
+  buildStates();
   // source
   const sources=[...new Set(S.all.map(srcOf))].sort();
   $('#f-source').innerHTML=['all',...sources].map(o=>`<option value="${esc(o)}">${o==='all'?'All sources':esc(o)}</option>`).join('');
   $('#f-source').value=S.f.source;
   rebuildCounties();
 }
+// which states actually appear in the data (DMV: DC/MD/VA)
+function allStates(){
+  return [...new Set(S.all.map(n=>cleanState(n.state)).filter(Boolean))].sort();
+}
+// multi-select state list with a "Select all" head, mirroring the county box
+function buildStates(){
+  const list=allStates();
+  // drop any selection no longer present in the data
+  S.f.states=new Set([...S.f.states].filter(s=>list.includes(s)));
+  const box=$('#st-list');
+  box.innerHTML=list.length?list.map(s=>{
+    const on=S.f.states.has(s);
+    return `<label class="cty-item"><input type="checkbox" data-st="${esc(s)}" ${on?'checked':''}> ${esc(s)}</label>`;
+  }).join(''):'<div style="padding:14px;color:var(--faint);font-size:13px;">No states available.</div>';
+  box.querySelectorAll('input[data-st]').forEach(inp=>inp.onchange=()=>{
+    inp.checked?S.f.states.add(inp.dataset.st):S.f.states.delete(inp.dataset.st);
+    rebuildCounties(); paintStCount();
+  });
+  paintStCount();
+}
+function paintStCount(){
+  const total=allStates().length, sel=S.f.states.size;
+  // empty selection means "all states"
+  $('#st-count').textContent = sel? (sel+' selected') : (total+' available');
+  $('#st-selectall').checked = sel===0 || sel===total;
+  $('#st-selectall').indeterminate = sel>0 && sel<total;
+}
+// counties scoped to the selected state(s); empty selection = all states
 function countiesForState(){
-  const st=S.f.state;
+  const sts=S.f.states;
   const set=new Set();
-  S.all.forEach(n=>{ if(!n.county) return; if(st==='all'||cleanState(n.state)===st) set.add(n.county); });
+  S.all.forEach(n=>{ if(!n.county) return; if(sts.size===0||sts.has(cleanState(n.state))) set.add(n.county); });
   return [...set].sort((a,b)=>a.localeCompare(b));
 }
 function rebuildCounties(){
@@ -651,7 +680,7 @@ function paintCtyCount(){
 function applySearch(){
   const f=S.f;
   let rows=S.all.filter(n=>{
-    if(f.state!=='all' && cleanState(n.state)!==f.state) return false;
+    if(f.states.size && !f.states.has(cleanState(n.state))) return false;
     if(f.counties.size && !f.counties.has(n.county)) return false;
     if(f.source!=='all' && srcOf(n)!==f.source) return false;
     if(f.q){ const hay=((n.property_address||'')+' '+(n.county||'')+' '+placeOf(n)+' '+(n.full_text||'')).toLowerCase(); if(!hay.includes(f.q.toLowerCase())) return false; }
@@ -666,7 +695,7 @@ function applySearch(){
 function renderResults(){
   const rows=S.rows;
   $('#res-count').textContent=rows.length.toLocaleString();
-  const stTxt = S.f.state==='all'?'all states':S.f.state;
+  const stTxt = S.f.states.size? [...S.f.states].sort().join(' · ') : 'all states';
   const ctyTxt = S.f.counties.size? (' · '+S.f.counties.size+' counties'):'';
   $('#res-sub').textContent=' notices · '+stTxt+ctyTxt;
   $('#map-badge').textContent=Math.min(rows.length,400).toLocaleString()+' mapped';
@@ -817,7 +846,8 @@ function bind(){
   ['#auth-first','#auth-last','#auth-email'].forEach(sel=>$(sel).addEventListener('keydown',e=>{ if(e.key==='Enter') sendLink(); }));
   $('#btn-search').onclick=()=>{ S.f.q=$('#f-q').value.trim(); S.f.source=$('#f-source').value; S.f.from=$('#f-from').value; S.f.to=$('#f-to').value; applySearch(); };
   $('#f-q').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#btn-search').click(); });
-  $('#btn-reset').onclick=()=>{ S.f={q:'',state:'all',counties:new Set(),source:'all',from:'',to:''}; $('#f-q').value='';$('#f-from').value='';$('#f-to').value=''; buildFilters(); applySearch(); };
+  $('#btn-reset').onclick=()=>{ S.f={q:'',states:new Set(),counties:new Set(),source:'all',from:'',to:''}; $('#f-q').value='';$('#f-from').value='';$('#f-to').value=''; buildFilters(); applySearch(); };
+  $('#st-selectall').onchange=e=>{ S.f.states = e.target.checked? new Set(allStates()): new Set(); buildStates(); rebuildCounties(); };
   $('#cty-selectall').onchange=e=>{ const all=countiesForState(); S.f.counties = e.target.checked? new Set(all): new Set(); rebuildCounties(); };
   $('#res-sort').onclick=()=>{ S.sort=S.sort==='date'?'source':'date'; $('#res-sort').textContent='Sort · '+(S.sort==='date'?'Date':'Source'); applySearch(); };
   $('#res-export').onclick=exportCsv;
