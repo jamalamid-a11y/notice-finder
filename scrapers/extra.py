@@ -341,7 +341,7 @@ class WaTimesScraper(BaseScraper):
         for page in range(1, self.MAX_PAGES + 1):
             url = self.BASE + cat_path + ("" if page == 1 else "/%d" % page) + ".html"
             try:
-                r = requests.get(url, headers=UA, timeout=20)
+                r = requests.get(url, headers=UA, timeout=10)
                 r.raise_for_status()
             except Exception:
                 break
@@ -391,16 +391,26 @@ class WaTimesScraper(BaseScraper):
     _FORECLOSURE_RE = re.compile(
         r"trustee'?s?\s+sale|substitute\s+trustee|foreclosure\s+sale", re.I)
 
+    # Hard wall-clock budget for the whole scrape. The site sometimes throttles
+    # our detail-page fetches, and on the free tier an unbounded walk hangs the
+    # startup refresh — so we stop after this many seconds and keep what we got.
+    TIME_BUDGET = 90
+
     def fetch(self, max_pages=1):
+        deadline = time.time() + self.TIME_BUDGET
         for cat_path, county, state in self.CATEGORIES:
+            if time.time() > deadline:
+                break
             is_legal = "Legal-Notices" in cat_path
             try:
                 links = self._detail_links(cat_path)
             except Exception:
                 continue
             for link in links:
+                if time.time() > deadline:
+                    break
                 try:
-                    dr = requests.get(self.BASE + link, headers=UA, timeout=20)
+                    dr = requests.get(self.BASE + link, headers=UA, timeout=10)
                     dr.raise_for_status()
                 except Exception:
                     continue
