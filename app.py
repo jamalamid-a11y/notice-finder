@@ -15,6 +15,7 @@ Routes:
 import csv
 import io
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime
@@ -27,6 +28,23 @@ app = Flask(__name__)
 DB = os.path.join(os.path.dirname(__file__), "notices.db")
 _refresh_lock = threading.Lock()
 _status = {"running": False, "last_run": None, "last_count": 0, "error": None}
+
+# Some sources (e.g. the HUD list) stamp every row with a default state even
+# when the property is elsewhere in the DMV. When the property address itself
+# spells out a state ("... Washington, DC 20012"), trust that over the default.
+_ADDR_STATE_RE = re.compile(
+    r",\s*(DC|MD|VA|District of Columbia|Maryland|Virginia)\b", re.I)
+_ST_MAP = {"dc": "DC", "md": "MD", "va": "VA",
+           "district of columbia": "DC", "maryland": "MD", "virginia": "VA"}
+
+
+def _corrected_state(state, address):
+    """Prefer an explicit state in the property address over a scraper default."""
+    if address:
+        matches = _ADDR_STATE_RE.findall(address)
+        if matches:
+            return _ST_MAP.get(matches[-1].lower(), state)
+    return state
 
 
 # --- storage ----------------------------------------------------------------
@@ -67,7 +85,7 @@ def save(notices):
                 """, (d["source"], d["publication"], d["published_date"],
                       d["title"], d["sale_date"], d["sale_time"],
                       d["property_address"], d["court_location"],
-                      d["county"], d["state"],
+                      d["county"], _corrected_state(d["state"], d["property_address"]),
                       d["full_text"], d["url"], fp))
                 rows += cur.rowcount
             except sqlite3.Error:
