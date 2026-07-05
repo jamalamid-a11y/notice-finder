@@ -306,15 +306,18 @@ class WaTimesScraper(BaseScraper):
 
     BASE = "http://classified.washingtontimes.com/"
     # (category path, county label, state)
+    # Fairfax and Prince William first: their deeper pages hold the this-week
+    # sales users most often report missing, and the TIME_BUDGET below may not
+    # reach categories near the end when the site is slow to respond.
     CATEGORIES = [
+        ("category/358/Foreclosure-Sales-FFX-Cty", "Fairfax", "VA"),
+        ("category/394/Foreclosure-Sales-PW-Cty", "Prince William", "VA"),
         ("category/354/Foreclosure-Sales-ALEX-Cty", "Alexandria", "VA"),
         ("category/355/Foreclosure-Sales-ARL-Cty", "Arlington", "VA"),
         ("category/357/Foreclosure-Sales-DC", "Washington", "DC"),
-        ("category/358/Foreclosure-Sales-FFX-Cty", "Fairfax", "VA"),
         ("category/359/Foreclosure-Sales-Mont-Cty", "Montgomery", "MD"),
         ("category/360/Foreclosure-Sales-PG-Cty", "Prince George's", "MD"),
         ("category/393/Foreclosure-Sales-Charles-Cty", "Charles", "MD"),
-        ("category/394/Foreclosure-Sales-PW-Cty", "Prince William", "VA"),
         ("category/405/Forclosure-Sales-VA", None, "VA"),
     ]
 
@@ -486,3 +489,127 @@ class RefererTableScraper(BaseScraper):
                 full_text=" | ".join(f"{k}: {v}" for k, v in row.items() if v),
                 url=self.url,
             )
+
+
+class PowerBIScraper(BaseScraper):
+    """
+    A PowerBI "publish to web" report (app.powerbi.com/view?r=...). Rather than
+    drive a headless browser we call the same public API the embed uses:
+        POST {cluster}/public/reports/querydata?synchronous=true
+        header  X-PowerBI-ResourceKey: <key>
+    LOGS Legal Group's VA foreclosure list is one of these. The response is a
+    dictionary-encoded "DSR" shape (row values are indices into per-column
+    ValueDicts, with a repeat bitmap for values unchanged from the prior row);
+    _parse_dsr unpacks it. cluster/key/model_id/entity/columns are read once from
+    the report (modelsAndExploration) and pasted in when registering the source.
+    """
+
+    def __init__(self, source_id, label, cluster, resource_key, model_id,
+                 entity, columns, url, state_default="VA"):
+        # columns: ordered [(powerbi_property, notice_field)] where notice_field
+        # is property_address / sale_date / sale_time / county / state / _company.
+        self.source_id = source_id
+        self.label = label
+        self.cluster = cluster.rstrip("/")
+        self.resource_key = resource_key
+        self.model_id = model_id
+        self.entity = entity
+        self.columns = columns
+        self.url = url
+        self.state_default = state_default
+
+    def fetch(self, max_pages=1):
+        select = [{"Column": {"Expression": {"SourceRef": {"Source": "u"}},
+                              "Property": prop}, "Name": "u.%s" % prop}
+                  for prop, _ in self.columns]
+        body = {
+            "version": "1.0.0",
+            "queries": [{
+                "Query": {"Commands": [{"SemanticQueryDataShapeCommand": {
+                    "Query": {"Version": 2,
+                              "From": [{"Name": "u", "Entity": self.entity, "Type": 0}],
+                              "Select": select},
+                    "Binding": {"Primary": {"Groupings": [
+                                    {"Projections": list(range(len(self.columns)))}]},
+                                "DataReduction": {"DataVolume": 3,
+                                    "Primary": {"Window": {"Count": 30000}}},
+                                "Version": 1},
+                }}]},
+                "QueryId": "",
+                "ApplicationContext": {"DatasetId": str(self.model_id)},
+            }],
+            "cancelQueries": [],
+            "modelId": self.model_id,
+        }
+        headers = dict(UA)
+        headers["X-PowerBI-ResourceKey"] = self.resource_key
+        headers["Content-Type"] = "application/json;charset=UTF-8"
+        r = requests.post(self.cluster + "/public/reports/querydata?synchronous=true",
+                          json=body, headers=headers, timeout=60)
+        r.raise_for_status()
+        ds = r.json()["results"][0]["result"]["data"]["dsr"]["DS"][0]
+        for row in self._parse_dsr(ds):
+            f = dict(zip((fld for _, fld in self.columns), row))
+            yield Notice(
+                source=self.source_id, publication=self.label,
+                sale_date=self._pbi_date(f.get("sale_date")),
+                sale_time=self._pbi_time(f.get("sale_time")),
+                property_address=f.get("property_address"),
+                county=f.get("county"),
+                state=f.get("state") or self.state_default,
+                court_location=None,
+                title=(f.get("_company") or self.label)[:140],
+                full_text=" | ".join(str(f[k]) for k in
+                                     ("property_address", "county", "state", "_company")
+                                     if f.get(k)),
+                url=self.url,
+            )
+
+    def _parse_dsr(self, ds):
+        rows = (ds.get("PH") or [{}])[0].get("DM0", [])
+        dicts = ds.get("ValueDicts", {})
+        n = len(self.columns)
+        schema = None
+        prev = [None] * n
+        for dm in rows:
+            if "S" in dm:
+                schema = dm["S"]
+            cvals = dm.get("C", [])
+            rep = dm.get("R", 0)          # bit i set -> value repeats prior row
+            nul = dm.get("Ø", 0)     # bit i set -> value is null
+            out, ci = [], 0
+            for i in range(n):
+                if nul & (1 << i):
+                    v = None
+                elif rep & (1 << i):
+                    v = prev[i]
+                else:
+                    v = cvals[ci] if ci < len(cvals) else None
+                    ci += 1
+                out.append(v)
+            prev = list(out)
+            resolved = []
+            for i in range(n):
+                v = out[i]
+                dn = schema[i].get("DN") if (schema and i < len(schema)) else None
+                if dn and isinstance(v, int) and 0 <= v < len(dicts.get(dn, [])):
+                    v = dicts[dn][v]
+                resolved.append(v)
+            yield resolved
+
+    @staticmethod
+    def _pbi_date(ms):
+        if isinstance(ms, (int, float)):
+            try:
+                return time.strftime("%Y-%m-%d", time.gmtime(ms / 1000))
+            except (ValueError, OverflowError, OSError):
+                return None
+        return None
+
+    @staticmethod
+    def _pbi_time(ms):
+        if isinstance(ms, (int, float)):
+            secs = int(ms / 1000)
+            h, m = secs // 3600, (secs % 3600) // 60
+            return "%d:%02d %s" % (h % 12 or 12, m, "AM" if h < 12 else "PM")
+        return None
