@@ -316,12 +316,17 @@ class WaTimesScraper(BaseScraper):
         ("category/393/Foreclosure-Sales-Charles-Cty", "Charles", "MD"),
         ("category/394/Foreclosure-Sales-PW-Cty", "Prince William", "VA"),
         ("category/405/Forclosure-Sales-VA", None, "VA"),
+        # Site-wide legal-notice section — Dolan Reid, Kelly Hamric, LOGS and
+        # others publish trustee sales here that don't always appear in the
+        # per-county lists. It's mostly non-foreclosure, so fetch() filters it to
+        # trustee sales; county and state are derived from each notice.
+        ("category/315/Legal-Notices", None, None),
     ]
 
-    MAX_PAGES = 3  # how many category-browse pages to walk (10 listings each)
+    MAX_PAGES = 6  # how many category-browse pages to walk (10 listings each)
 
     def __init__(self, source_id="watimes", label="Washington Times (foreclosure notices)",
-                 per_category=30):
+                 per_category=60):
         self.source_id = source_id
         self.label = label
         self.per_category = per_category
@@ -380,8 +385,14 @@ class WaTimesScraper(BaseScraper):
                     return cand
         return fallback
 
+    # trustee/foreclosure-sale language used to keep only relevant notices out of
+    # the mixed Legal-Notices category.
+    _FORECLOSURE_RE = re.compile(
+        r"trustee'?s?\s+sale|substitute\s+trustee|foreclosure\s+sale", re.I)
+
     def fetch(self, max_pages=1):
         for cat_path, county, state in self.CATEGORIES:
+            is_legal = "Legal-Notices" in cat_path
             try:
                 links = self._detail_links(cat_path)
             except Exception:
@@ -395,17 +406,24 @@ class WaTimesScraper(BaseScraper):
                 text = self._detail_text(dr.text)
                 if not text or len(text) < 40:
                     continue
+                # the Legal-Notices section carries many non-foreclosure filings.
+                if is_legal and not self._FORECLOSURE_RE.search(text):
+                    continue
                 parsed = _parse_all(text)
+                addr = self._address(text, parsed.get("property_address"))
                 ccounty = county or parsed.get("county")
                 if ccounty:
                     ccounty = re.sub(r"\s+(County|Cty\.?)$", "", ccounty).strip()
+                # categories without a fixed state (VA-wide, Legal-Notices): read
+                # the state off the address, falling back to VA.
+                nstate = state or _state_from(addr or "") or _state_from(text) or "VA"
                 yield Notice(
                     source=self.source_id, publication=self.label,
                     sale_date=parsed.get("sale_date"),
                     sale_time=parsed.get("sale_time"),
-                    property_address=self._address(text, parsed.get("property_address")),
+                    property_address=addr,
                     court_location=parsed.get("court_location"),
-                    county=ccounty, state=state,
+                    county=ccounty, state=nstate,
                     title=text[:140], full_text=text[:4000],
                     url=self.BASE + link,
                 )
