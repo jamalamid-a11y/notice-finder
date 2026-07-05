@@ -554,6 +554,8 @@ async function sendLink(){
 async function loadData(){
   const d=await fetch('/api/notices').then(r=>r.json());
   S.all=d.notices||[]; renderStatus(d.status); buildLanding(d);
+  // if the index was opened before data arrived (cold start), rebuild it now
+  if(indexReady){ buildFilters(); applySearch(); }
 }
 function renderStatus(st){
   const el=$('#nav-status'); if(!st){el.textContent='';return;}
