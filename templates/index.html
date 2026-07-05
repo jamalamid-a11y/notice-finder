@@ -415,11 +415,15 @@ h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;fo
       <div class="lock-badge">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </div>
-      <h3>Verify your email to open the index</h3>
-      <p>Enter your email and we'll send a secure sign-in link. No password, no phone number — just click the link to verify and you're in.</p>
+      <h3>Request access to the index</h3>
+      <p>Tell us who you are and we'll email a secure link to verify your address. No password, no phone number — click the link and you're in.</p>
       <div id="auth-form">
-        <input class="inp" id="auth-email" type="email" placeholder="you@example.com" style="margin-bottom:12px;">
-        <button class="btn btn-primary" id="auth-send" style="width:100%;">Send my sign-in link</button>
+        <div style="display:flex;gap:10px;margin-bottom:12px;">
+          <input class="inp" id="auth-first" type="text" placeholder="First name" autocomplete="given-name" style="flex:1;min-width:0;">
+          <input class="inp" id="auth-last" type="text" placeholder="Last name" autocomplete="family-name" style="flex:1;min-width:0;">
+        </div>
+        <input class="inp" id="auth-email" type="email" placeholder="you@example.com" autocomplete="email" style="margin-bottom:12px;">
+        <button class="btn btn-primary" id="auth-send" style="width:100%;">Request access →</button>
       </div>
       <div id="auth-msg" style="margin-top:14px;"></div>
     </div>
@@ -435,6 +439,9 @@ h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;fo
    ========================================================= */
 const SUPABASE_URL = "https://qfulezsfkelcxxogrult.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_TvHgi9A7yR6YH-J9wtgp5g_QhKotpuB";
+// Web3Forms access key — emails the admin whenever someone requests access.
+// (Free, no backend. Get one at web3forms.com; the key is tied to the destination inbox.)
+const ADMIN_NOTIFY_KEY = "";
 
 const $ = s => document.querySelector(s);
 const esc = s => (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -503,21 +510,38 @@ function paintAuthState(){
   else hint.innerHTML='';
   applyGate();
 }
-function openAuthModal(){ $('#auth-overlay').classList.remove('gv-hidden'); $('#auth-msg').innerHTML=''; setTimeout(()=>$('#auth-email').focus(),50); }
+function openAuthModal(){ $('#auth-overlay').classList.remove('gv-hidden'); $('#auth-msg').innerHTML=''; $('#auth-form').style.display=''; setTimeout(()=>$('#auth-first').focus(),50); }
 function closeAuth(){ $('#auth-overlay').classList.add('gv-hidden'); }
+// Fire-and-forget: let the admin know a new access request came in.
+function notifyAdmin(first,last,email){
+  if(!ADMIN_NOTIFY_KEY) return;
+  try{
+    fetch('https://api.web3forms.com/submit',{method:'POST',
+      headers:{'Content-Type':'application/json',Accept:'application/json'},
+      body:JSON.stringify({access_key:ADMIN_NOTIFY_KEY,
+        subject:'New Gavel access request — '+first+' '+last,
+        from_name:'Gavel Access Requests', name:first+' '+last, email:email,
+        message:'New access request:\n\n'+first+' '+last+' <'+email+'> just requested access to the Gavel index.\n\nThey have been emailed a verification link.'})
+    }).catch(()=>{});
+  }catch(e){}
+}
 async function sendLink(){
+  const first=($('#auth-first').value||'').trim();
+  const last=($('#auth-last').value||'').trim();
   const email=($('#auth-email').value||'').trim();
   const msg=$('#auth-msg');
+  if(!first||!last){ msg.innerHTML='<div class="msg-err">Please enter your first and last name.</div>'; return; }
   if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ msg.innerHTML='<div class="msg-err">Please enter a valid email address.</div>'; return; }
   if(!authEnabled()){ msg.innerHTML='<div class="msg-err">Sign-in isn\'t configured yet. (Add your Supabase keys to enable it.)</div>'; return; }
   const btn=$('#auth-send'); btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Sending…';
   try{
-    const { error } = await supa.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.origin } });
+    const { error } = await supa.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.origin, data:{ first_name:first, last_name:last, full_name:first+' '+last } } });
     if(error) throw error;
-    msg.innerHTML='<div class="msg-ok">✓ Check your inbox — we sent a secure sign-in link to <b>'+esc(email)+'</b>. Click it to verify and open the index.</div>';
+    notifyAdmin(first,last,email);
+    msg.innerHTML='<div class="msg-ok">✓ Thanks, '+esc(first)+'. We emailed a secure verification link to <b>'+esc(email)+'</b> — click it to confirm your address and open the index.</div>';
     $('#auth-form').style.display='none';
   }catch(e){ msg.innerHTML='<div class="msg-err">'+esc(e.message||'Could not send link. Try again.')+'</div>'; }
-  btn.disabled=false; btn.innerHTML='Send my sign-in link';
+  btn.disabled=false; btn.innerHTML='Request access →';
 }
 
 /* ---------- data load ---------- */
@@ -790,7 +814,7 @@ function bind(){
   $('#auth-x').onclick=closeAuth;
   $('#auth-overlay').onclick=e=>{ if(e.target===$('#auth-overlay')) closeAuth(); };
   $('#auth-send').onclick=sendLink;
-  $('#auth-email').addEventListener('keydown',e=>{ if(e.key==='Enter') sendLink(); });
+  ['#auth-first','#auth-last','#auth-email'].forEach(sel=>$(sel).addEventListener('keydown',e=>{ if(e.key==='Enter') sendLink(); }));
   $('#btn-search').onclick=()=>{ S.f.q=$('#f-q').value.trim(); S.f.source=$('#f-source').value; S.f.from=$('#f-from').value; S.f.to=$('#f-to').value; applySearch(); };
   $('#f-q').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#btn-search').click(); });
   $('#btn-reset').onclick=()=>{ S.f={q:'',state:'all',counties:new Set(),source:'all',from:'',to:''}; $('#f-q').value='';$('#f-from').value='';$('#f-to').value=''; buildFilters(); applySearch(); };
