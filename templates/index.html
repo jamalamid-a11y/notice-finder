@@ -133,7 +133,10 @@ h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;fo
 .cty-item{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:7px;font-size:13.5px;cursor:pointer;}
 .cty-item:hover{background:var(--panel);}
 .cty-item input{accent-color:var(--brand);width:15px;height:15px;}
-.dates{display:flex;gap:10px;}
+.dates{display:flex;flex-direction:column;gap:10px;}
+.datecol{display:flex;align-items:center;gap:10px;}
+.datelab{flex:0 0 34px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}
+.datecol .inp{flex:1;min-width:0;}
 .searchbar{position:sticky;bottom:-24px;background:linear-gradient(180deg,rgba(255,255,255,0),#fff 30%);padding-top:12px;margin-top:6px;}
 .btn-search{width:100%;padding:13px 0;font-size:15px;}
 .btn-reset{width:100%;margin-top:9px;background:none;border:1px solid var(--line-2);}
@@ -361,8 +364,14 @@ h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;fo
       <div class="field">
         <label>Sale date range</label>
         <div class="dates">
-          <input class="inp" id="f-from" type="date" aria-label="from">
-          <input class="inp" id="f-to" type="date" aria-label="to">
+          <div class="datecol">
+            <span class="datelab">From</span>
+            <input class="inp" id="f-from" type="date" aria-label="Sale date from">
+          </div>
+          <div class="datecol">
+            <span class="datelab">To</span>
+            <input class="inp" id="f-to" type="date" aria-label="Sale date to">
+          </div>
         </div>
       </div>
 
