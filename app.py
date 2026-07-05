@@ -47,6 +47,41 @@ def _corrected_state(state, address):
     return state
 
 
+# County names arrive in many formats across sources ("County of Fairfax",
+# "Fairfax County", "Fairfax", "City of Fairfax", "Fairfax City"). Canonicalize so
+# each jurisdiction appears once in the filter. But a few VA/MD names are BOTH a
+# county and a separate independent city — keep those distinct by tagging the city
+# form "<Name> City".
+_DUAL_JURIS = {"fairfax", "richmond", "roanoke", "franklin", "baltimore"}
+# Counties whose official name ends in "City" (the word is part of the name).
+_CITY_IN_NAME = {"james city", "charles city"}
+
+
+def _normalize_county(county):
+    if not county:
+        return county
+    c = " ".join(county.split()).strip(" ,.")
+    c = c.replace("WiIliam", "William")            # observed typo (capital I)
+    if c.lower() in ("frederick-va", "frederick va"):
+        c = "Frederick"
+    is_city = False
+    m = re.match(r"(?i)^county of\s+(.+)$", c)
+    if m:
+        c = m.group(1)
+    else:
+        m = re.match(r"(?i)^city of\s+(.+)$", c)
+        if m:
+            c, is_city = m.group(1), True
+        elif c.lower().endswith(" county"):
+            c = c[:-len(" county")]
+        elif c.lower().endswith(" city") and c.lower() not in _CITY_IN_NAME:
+            c, is_city = c[:-len(" city")], True
+    c = re.sub(r"\bOf\b", "of", c).strip()         # "Isle Of Wight" -> "Isle of Wight"
+    if is_city and c.lower() in _DUAL_JURIS:
+        return c + " City"
+    return c
+
+
 # --- storage ----------------------------------------------------------------
 
 def db():
@@ -85,7 +120,8 @@ def save(notices):
                 """, (d["source"], d["publication"], d["published_date"],
                       d["title"], d["sale_date"], d["sale_time"],
                       d["property_address"], d["court_location"],
-                      d["county"], _corrected_state(d["state"], d["property_address"]),
+                      _normalize_county(d["county"]),
+                      _corrected_state(d["state"], d["property_address"]),
                       d["full_text"], d["url"], fp))
                 rows += cur.rowcount
             except sqlite3.Error:
