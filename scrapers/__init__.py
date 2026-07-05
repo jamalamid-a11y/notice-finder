@@ -3,7 +3,8 @@
 from .virginia import VirginiaScraper
 from .html_table import HtmlTableScraper
 from .extra import (DivListScraper, PdfSalesScraper, CsvScraper,
-                    EnoticeScraper, WaTimesScraper, RefererTableScraper)
+                    EnoticeScraper, WaTimesScraper, RefererTableScraper,
+                    PowerBIScraper)
 
 # Every scraper the app knows about.
 #  - VirginiaScraper: the publicnoticevirginia.com portal (day-by-day search).
@@ -35,6 +36,19 @@ SCRAPERS = [
                    newspaper="The Washington Post",
                    notice_types=["Trustee Sale"]),
     WaTimesScraper(),
+    PowerBIScraper(
+        "logs", "LOGS Legal Group",
+        cluster="https://wabi-us-north-central-h-primary-api.analysis.windows.net",
+        resource_key="62ddb3de-c988-4812-8a65-4bc70d8c132b",
+        model_id=453013,
+        entity="web Upcoming Sales Report  VA",
+        columns=[("FULL_ADDRESS", "property_address"),
+                 ("SALE_DATE", "sale_date"),
+                 ("SALE_TIME", "sale_time"),
+                 ("COUNTY_NAME", "county"),
+                 ("STATE_CODE", "state"),
+                 ("CONTACT_COMP_NAME", "_company")],
+        url="https://www.logs.com/va-sales-report.html"),
     RefererTableScraper("aldridgepite", "Aldridge Pite",
                         "https://aldridgepite.com/sale-day-listings-selection/foreclosure-listings-virginia/",
                         referer="https://aldridgepite.com/disclaimer-virginia/"),
