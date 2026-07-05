@@ -316,17 +316,18 @@ class WaTimesScraper(BaseScraper):
         ("category/393/Foreclosure-Sales-Charles-Cty", "Charles", "MD"),
         ("category/394/Foreclosure-Sales-PW-Cty", "Prince William", "VA"),
         ("category/405/Forclosure-Sales-VA", None, "VA"),
-        # Site-wide legal-notice section — Dolan Reid, Kelly Hamric, LOGS and
-        # others publish trustee sales here that don't always appear in the
-        # per-county lists. It's mostly non-foreclosure, so fetch() filters it to
-        # trustee sales; county and state are derived from each notice.
-        ("category/315/Legal-Notices", None, None),
     ]
 
-    MAX_PAGES = 6  # how many category-browse pages to walk (10 listings each)
+    # Walk deep enough to catch this-week sales that newer postings pushed onto
+    # later pages (e.g. 9324 Taney Rd sat on page 4 of the PW list), but not so
+    # deep that the free-tier refresh drowns in sequential requests. (The site's
+    # huge site-wide "Legal-Notices" category is deliberately not walked here —
+    # it's mostly non-foreclosure and too request-heavy for the free tier; the
+    # per-county lists below already carry the trustee sales we need.)
+    MAX_PAGES = 5  # how many category-browse pages to walk (10 listings each)
 
     def __init__(self, source_id="watimes", label="Washington Times (foreclosure notices)",
-                 per_category=60):
+                 per_category=50):
         self.source_id = source_id
         self.label = label
         self.per_category = per_category
