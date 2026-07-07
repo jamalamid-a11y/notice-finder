@@ -15,6 +15,7 @@ All produce the same Notice records as every other source.
 
 import csv as csvmod
 import io
+import json
 import re
 import time
 
@@ -613,3 +614,100 @@ class PowerBIScraper(BaseScraper):
             h, m = secs // 3600, (secs % 3600) // 60
             return "%d:%02d %s" % (h % 12 or 12, m, "AM" if h < 12 else "PM")
         return None
+
+
+_DMV_RE = re.compile(
+    r"\b(?:VA|MD|DC|Virginia|Maryland|District\s+of\s+Columbia|Washington,?\s*D\.?C\.?)\b",
+    re.I)
+_DMV_STATE = re.compile(r"\b(Virginia|Maryland|District\s+of\s+Columbia)\b", re.I)
+
+
+class AuctionIndexScraper(BaseScraper):
+    """
+    A generic auctioneer whose index page links to per-listing detail pages
+    (AJ Billig, Dudley, ...). We collect detail links matching `link_re` (group 1
+    is the href), fetch each page, take its JSON-LD name + visible text, pull
+    address/sale-date via the notice parser, and keep only DMV (VA/MD/DC)
+    listings. Property-type classification is done app-side at insert from the
+    title/full_text, so commercial listings land in the commercial filter.
+
+    Pass `seed_urls` instead of an index when a site's listing index is a SPA we
+    can't enumerate cheaply (e.g. Alex Cooper) — those explicit detail pages are
+    still server-rendered with JSON-LD and parse fine.
+    """
+
+    def __init__(self, source_id, label, base, index_url=None, link_re=None,
+                 seed_urls=(), max_items=25, dmv_only=True):
+        self.source_id = source_id
+        self.label = label
+        self.base = base.rstrip("/")
+        self.index_url = index_url
+        self.link_re = re.compile(link_re) if link_re else None
+        self.seed_urls = list(seed_urls)
+        self.max_items = max_items
+        self.dmv_only = dmv_only
+
+    def _detail_urls(self):
+        if self.seed_urls:
+            return self.seed_urls[: self.max_items]
+        r = requests.get(self.index_url, headers=UA, timeout=30)
+        r.raise_for_status()
+        seen, out = set(), []
+        for m in self.link_re.finditer(r.text):
+            href = m.group(1)
+            if href.startswith("/"):
+                href = self.base + href
+            if href not in seen:
+                seen.add(href)
+                out.append(href)
+        return out[: self.max_items]
+
+    @staticmethod
+    def _jsonld_name(soup):
+        for tag in soup.find_all("script", type="application/ld+json"):
+            try:
+                obj = json.loads(tag.string or "{}")
+            except Exception:
+                continue
+            for o in (obj if isinstance(obj, list) else [obj]):
+                if isinstance(o, dict) and o.get("name"):
+                    return o["name"]
+        return None
+
+    def fetch(self, max_pages=1):
+        try:
+            urls = self._detail_urls()
+        except Exception:
+            return
+        for url in urls:
+            try:
+                dr = requests.get(url, headers=UA, timeout=25)
+                dr.raise_for_status()
+            except Exception:
+                continue
+            soup = BeautifulSoup(dr.text, "lxml")
+            name = self._jsonld_name(soup)
+            title = name or (soup.title.get_text(strip=True) if soup.title else "")
+            for bad in soup(["script", "style", "nav", "header", "footer"]):
+                bad.extract()
+            text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))[:4000]
+            blob = title + " " + text
+            if self.dmv_only and not _DMV_RE.search(blob):
+                continue
+            parsed = _parse_all(text)
+            state = _state_from(blob)
+            if not state:
+                m = _DMV_STATE.search(blob)
+                state = ({"virginia": "VA", "maryland": "MD",
+                          "district of columbia": "DC"}[m.group(1).lower()]
+                         if m else None)
+            yield Notice(
+                source=self.source_id, publication=self.label,
+                sale_date=parsed.get("sale_date"),
+                sale_time=parsed.get("sale_time"),
+                property_address=parsed.get("property_address") or (name or None),
+                court_location=parsed.get("court_location"),
+                county=parsed.get("county"), state=state,
+                title=title[:140], full_text=text,
+                url=url,
+            )
