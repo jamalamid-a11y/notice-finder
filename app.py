@@ -82,6 +82,38 @@ def _normalize_county(county):
     return c
 
 
+# Classify each listing by property type from its text so the commercial filter
+# includes only true commercial properties. Order matters: senior-housing is
+# checked before commercial so "senior living apartments" isn't tagged commercial.
+_TYPE_PATTERNS = [
+    ("senior_housing", re.compile(
+        r"senior\s+(?:housing|living|apartments|community)|assisted\s+living|"
+        r"nursing\s+(?:home|facility)|memory\s+care|independent\s+living|"
+        r"retirement\s+(?:home|community)|continuing\s+care", re.I)),
+    ("commercial", re.compile(
+        r"\bcommercial\b|\bretail\b|\boffice\b|shopping\s+center|strip\s+(?:mall|center)|"
+        r"multi[-\s]?tenant|\bindustrial\b|warehouse|mixed[-\s]?use|storefront|"
+        r"restaurant|\bhotel\b|\bmotel\b|gas\s+station|medical\s+(?:office|building)|"
+        r"self[-\s]?storage|apartment\s+(?:building|complex|community)|"
+        r"\bbusiness\b|shopping\s+plaza", re.I)),
+    ("land", re.compile(
+        r"vacant\s+(?:land|lot|parcel)|raw\s+land|undeveloped|acreage|building\s+lot|"
+        r"\d+(?:\.\d+)?\s*acres?\b|land\s+only|\bwooded\s+lot", re.I)),
+    ("residential", re.compile(
+        r"single[-\s]?family|town\s?house|town\s?home|row\s?home|\bduplex\b|triplex|"
+        r"condo(?:minium)?|residential|\d+\s*(?:br|bed(?:room)?s?)\b|detached|"
+        r"rambler|colonial|cape\s+cod|rancher|bungalow", re.I)),
+]
+
+
+def _classify_property_type(text):
+    t = text or ""
+    for label, pat in _TYPE_PATTERNS:
+        if pat.search(t):
+            return label
+    return "residential"   # foreclosure notices skew residential when unspecified
+
+
 # --- storage ----------------------------------------------------------------
 
 def db():
@@ -98,6 +130,7 @@ def init_db():
                 source TEXT, publication TEXT, published_date TEXT, title TEXT,
                 sale_date TEXT, sale_time TEXT, property_address TEXT,
                 court_location TEXT, county TEXT, state TEXT,
+                property_type TEXT,
                 full_text TEXT, url TEXT,
                 fingerprint TEXT UNIQUE
             )
@@ -115,13 +148,17 @@ def save(notices):
                     INSERT OR IGNORE INTO notices
                     (source, publication, published_date, title, sale_date,
                      sale_time, property_address, court_location, county, state,
-                     full_text, url, fingerprint)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     property_type, full_text, url, fingerprint)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (d["source"], d["publication"], d["published_date"],
                       d["title"], d["sale_date"], d["sale_time"],
                       d["property_address"], d["court_location"],
                       _normalize_county(d["county"]),
                       _corrected_state(d["state"], d["property_address"]),
+                      _classify_property_type(
+                          " ".join(filter(None, (d.get("title"), d.get("full_text"),
+                                                 d.get("property_address")))),
+                      ),
                       d["full_text"], d["url"], fp))
                 rows += cur.rowcount
             except sqlite3.Error:
@@ -154,13 +191,16 @@ def run_refresh(source_id=None, max_pages=100, exclude=()):
 
 # --- query ------------------------------------------------------------------
 
-def query(source=None, dfrom=None, dto=None, q=None, counties=None, state=None):
+def query(source=None, dfrom=None, dto=None, q=None, counties=None, state=None,
+          property_type=None):
     sql = "SELECT * FROM notices WHERE 1=1"
     args = []
     if source:
         sql += " AND source=?"; args.append(source)
     if state:
         sql += " AND state=?"; args.append(state)
+    if property_type:
+        sql += " AND property_type=?"; args.append(property_type)
     counties = [c for c in (counties or []) if c]
     if counties:
         sql += " AND county IN (%s)" % ",".join("?" * len(counties))
@@ -190,7 +230,8 @@ def index():
 def api_notices():
     rows = query(request.args.get("source"), request.args.get("from"),
                  request.args.get("to"), request.args.get("q"),
-                 request.args.getlist("county"), request.args.get("state"))
+                 request.args.getlist("county"), request.args.get("state"),
+                 request.args.get("property_type"))
     everything = query()
     states = sorted({r["state"] for r in everything if r.get("state")})
     by_state = {}
@@ -198,8 +239,10 @@ def api_notices():
         if r.get("state") and r.get("county"):
             by_state.setdefault(r["state"], set()).add(r["county"])
     counties_by_state = {s: sorted(v) for s, v in by_state.items()}
+    types = sorted({r["property_type"] for r in everything if r.get("property_type")})
     return jsonify({"status": _status, "count": len(rows), "notices": rows,
-                    "states": states, "counties_by_state": counties_by_state})
+                    "states": states, "counties_by_state": counties_by_state,
+                    "property_types": types})
 
 
 @app.route("/api/refresh", methods=["POST"])
@@ -219,10 +262,11 @@ def api_status():
 def export_csv():
     rows = query(request.args.get("source"), request.args.get("from"),
                  request.args.get("to"), request.args.get("q"),
-                 request.args.getlist("county"), request.args.get("state"))
+                 request.args.getlist("county"), request.args.get("state"),
+                 request.args.get("property_type"))
     cols = ["source", "publication", "sale_date", "sale_time",
-            "property_address", "county", "state", "court_location",
-            "published_date", "url"]
+            "property_address", "county", "state", "property_type",
+            "court_location", "published_date", "url"]
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(cols)
