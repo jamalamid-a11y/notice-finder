@@ -362,6 +362,17 @@ h2.sh{font-size:clamp(26px,3.4vw,40px);line-height:1.08;letter-spacing:-.02em;fo
       </div>
 
       <div class="field">
+        <label for="f-ptype">Property type</label>
+        <select class="inp" id="f-ptype">
+          <option value="all">All property types</option>
+          <option value="commercial">Commercial</option>
+          <option value="residential">Residential</option>
+          <option value="senior_housing">Senior housing</option>
+          <option value="land">Land</option>
+        </select>
+      </div>
+
+      <div class="field">
         <label>Sale date range</label>
         <div class="dates">
           <div class="datecol">
@@ -494,7 +505,7 @@ function centroid(n,i){
 }
 
 const S = { view:'landing', all:[], rows:[], sort:'date', selectedId:null, detailId:null,
-  f:{q:'',states:new Set(),counties:new Set(),source:'all',from:'',to:''}, poll:null, session:null };
+  f:{q:'',states:new Set(),counties:new Set(),source:'all',ptype:'all',from:'',to:''}, poll:null, session:null };
 
 const fmtDate=d=>{ if(!d) return '—'; const p=String(d).split('-'); return p.length===3?p[1]+'/'+p[2]+'/'+p[0]:d; };
 const fmtLong=d=>{ if(!d) return ''; const p=String(d).split('-'); const M=['January','February','March','April','May','June','July','August','September','October','November','December']; return p.length===3?M[+p[1]-1]+' '+(+p[2])+', '+p[0]:d; };
@@ -694,6 +705,7 @@ function applySearch(){
     if(f.states.size && !f.states.has(cleanState(n.state))) return false;
     if(f.counties.size && !f.counties.has(n.county)) return false;
     if(f.source!=='all' && srcOf(n)!==f.source) return false;
+    if(f.ptype!=='all' && (n.property_type||'residential')!==f.ptype) return false;
     if(f.q){ const hay=((n.property_address||'')+' '+(n.county||'')+' '+placeOf(n)+' '+(n.full_text||'')).toLowerCase(); if(!hay.includes(f.q.toLowerCase())) return false; }
     if(f.from && (!n.sale_date||n.sale_date<f.from)) return false;
     if(f.to && (!n.sale_date||n.sale_date>f.to)) return false;
@@ -855,9 +867,10 @@ function bind(){
   $('#auth-overlay').onclick=e=>{ if(e.target===$('#auth-overlay')) closeAuth(); };
   $('#auth-send').onclick=sendLink;
   ['#auth-first','#auth-last','#auth-email'].forEach(sel=>$(sel).addEventListener('keydown',e=>{ if(e.key==='Enter') sendLink(); }));
-  $('#btn-search').onclick=()=>{ S.f.q=$('#f-q').value.trim(); S.f.source=$('#f-source').value; S.f.from=$('#f-from').value; S.f.to=$('#f-to').value; applySearch(); };
+  $('#btn-search').onclick=()=>{ S.f.q=$('#f-q').value.trim(); S.f.source=$('#f-source').value; S.f.ptype=$('#f-ptype').value; S.f.from=$('#f-from').value; S.f.to=$('#f-to').value; applySearch(); };
   $('#f-q').addEventListener('keydown',e=>{ if(e.key==='Enter') $('#btn-search').click(); });
-  $('#btn-reset').onclick=()=>{ S.f={q:'',states:new Set(),counties:new Set(),source:'all',from:'',to:''}; $('#f-q').value='';$('#f-from').value='';$('#f-to').value=''; buildFilters(); applySearch(); };
+  $('#f-ptype').onchange=()=>{ S.f.ptype=$('#f-ptype').value; applySearch(); };
+  $('#btn-reset').onclick=()=>{ S.f={q:'',states:new Set(),counties:new Set(),source:'all',ptype:'all',from:'',to:''}; $('#f-q').value='';$('#f-ptype').value='all';$('#f-from').value='';$('#f-to').value=''; buildFilters(); applySearch(); };
   $('#st-selectall').onchange=e=>{ S.f.states = e.target.checked? new Set(allStates()): new Set(); buildStates(); rebuildCounties(); };
   $('#cty-selectall').onchange=e=>{ const all=countiesForState(); S.f.counties = e.target.checked? new Set(all): new Set(); rebuildCounties(); };
   $('#res-sort').onclick=()=>{ S.sort=S.sort==='date'?'source':'date'; $('#res-sort').textContent='Sort · '+(S.sort==='date'?'Date':'Source'); applySearch(); };
