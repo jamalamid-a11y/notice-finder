@@ -4,7 +4,7 @@ from .virginia import VirginiaScraper
 from .html_table import HtmlTableScraper
 from .extra import (DivListScraper, PdfSalesScraper, CsvScraper,
                     EnoticeScraper, WaTimesScraper, RefererTableScraper,
-                    PowerBIScraper)
+                    PowerBIScraper, AuctionIndexScraper)
 
 # Every scraper the app knows about.
 #  - VirginiaScraper: the publicnoticevirginia.com portal (day-by-day search).
@@ -52,6 +52,24 @@ SCRAPERS = [
     RefererTableScraper("aldridgepite", "Aldridge Pite",
                         "https://aldridgepite.com/sale-day-listings-selection/foreclosure-listings-virginia/",
                         referer="https://aldridgepite.com/disclaimer-virginia/"),
+    # Auction houses (commercial + residential). DMV-only; property type is
+    # classified app-side so the commercial filter picks up true commercial lots.
+    AuctionIndexScraper("ajbillig", "AJ Billig (auctions)",
+                        base="https://ajbillig.com",
+                        index_url="https://ajbillig.com/auction-list/",
+                        link_re=r'href="(https://ajbillig\.com/auction/[^"/]+/)"'),
+    AuctionIndexScraper("dudley", "Dudley Resources (auctions)",
+                        base="https://www.dudleyresources.auction",
+                        index_url="https://www.dudleyresources.auction/auctions",
+                        link_re=r'href="(/auctions/detail/[^"]+)"'),
+    AuctionIndexScraper("alexcooper", "Alex Cooper (auctions)",
+                        base="https://realestate.alexcooper.com",
+                        seed_urls=[
+                            "https://realestate.alexcooper.com/auction-property/1-6GYU5F/"
+                            "substitute-trustees-sale-multi-tenant-retail-shopping-center-"
+                            "known-as-the-shops-at-congressional-village-aone-story-commercial-"
+                            "building-and-a-leasehold-interest-of-the-first-floor-of-192-"
+                            "halpine-road-in-rockville"]),
     VirginiaScraper(),   # slow (day-by-day, ~8 min) — kept last so fast sources load first
 ]
 
