@@ -117,14 +117,20 @@ def _classify_property_type(text):
 # --- storage ----------------------------------------------------------------
 
 def db():
-    conn = sqlite3.connect(DB)
+    # WAL + a real busy timeout: the background refresh writes while the web
+    # worker reads, and without these SQLite raises "database is locked".
+    conn = sqlite3.connect(DB, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
 
 def init_db():
-    with db() as c:
-        c.execute("""
+    conn = db()
+    try:
+        with conn:
+            conn.execute("""
             CREATE TABLE IF NOT EXISTS notices (
                 id INTEGER PRIMARY KEY,
                 source TEXT, publication TEXT, published_date TEXT, title TEXT,
@@ -135,11 +141,15 @@ def init_db():
                 fingerprint TEXT UNIQUE
             )
         """)
+    finally:
+        conn.close()
 
 
 def save(notices):
     rows = 0
-    with db() as c:
+    conn = db()
+    try:
+      with conn as c:
         for n in notices:
             d = n.as_dict()
             fp = f"{d['source']}|{(d['full_text'] or '')[:200]}"
@@ -163,6 +173,8 @@ def save(notices):
                 rows += cur.rowcount
             except sqlite3.Error:
                 pass
+    finally:
+        conn.close()
     return rows
 
 
@@ -214,8 +226,11 @@ def query(source=None, dfrom=None, dto=None, q=None, counties=None, state=None,
                 " OR court_location LIKE ? OR publication LIKE ?)")
         like = f"%{q}%"; args += [like, like, like, like]
     sql += " ORDER BY (sale_date IS NULL), sale_date ASC"
-    with db() as c:
-        return [dict(r) for r in c.execute(sql, args).fetchall()]
+    conn = db()
+    try:
+        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    finally:
+        conn.close()
 
 
 # --- routes -----------------------------------------------------------------
@@ -284,8 +299,11 @@ init_db()
 # (everything except the slow Virginia portal) in the background — that way the
 # app shows next-week sales within ~30s of waking, with no manual Refresh.
 def _startup_refresh():
-    with db() as c:
-        existing = c.execute("SELECT COUNT(*) FROM notices").fetchone()[0]
+    conn = db()
+    try:
+        existing = conn.execute("SELECT COUNT(*) FROM notices").fetchone()[0]
+    finally:
+        conn.close()
     if existing == 0:
         run_refresh(exclude={"va"})
 
