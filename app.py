@@ -114,6 +114,16 @@ def _classify_property_type(text):
     return "residential"   # foreclosure notices skew residential when unspecified
 
 
+def _slug_words(url):
+    """Auction listing URLs describe the property in the last path segment
+    ("...multi-tenant-retail-shopping-center...commercial-building..."). On SPA
+    pages (Alex Cooper) that slug is the only place the type is exposed, so feed
+    it to the classifier. Other sources' slugs carry no type words."""
+    if not url:
+        return None
+    return re.sub(r"[-_]+", " ", url.rstrip("/").rsplit("/", 1)[-1])
+
+
 # --- storage ----------------------------------------------------------------
 
 def db():
@@ -169,7 +179,8 @@ def save(notices):
                       _corrected_state(d["state"], d["property_address"]),
                       _classify_property_type(
                           " ".join(filter(None, (d.get("title"), d.get("full_text"),
-                                                 d.get("property_address")))),
+                                                 d.get("property_address"),
+                                                 _slug_words(d.get("url"))))),
                       ),
                       d["full_text"], d["url"], fp))
                 rows += cur.rowcount
