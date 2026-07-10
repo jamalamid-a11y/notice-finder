@@ -117,11 +117,12 @@ def _classify_property_type(text):
 # --- storage ----------------------------------------------------------------
 
 def db():
-    # WAL + a real busy timeout: the background refresh writes while the web
-    # worker reads, and without these SQLite raises "database is locked".
+    # A real busy timeout: the background refresh writes while the web worker
+    # reads, and without it SQLite raises "database is locked". journal_mode is
+    # persisted in the file, so it's set once in init_db() — setting it here on
+    # every connection would take an exclusive lock on each API request.
     conn = sqlite3.connect(DB, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
 
@@ -129,6 +130,7 @@ def db():
 def init_db():
     conn = db()
     try:
+        conn.execute("PRAGMA journal_mode=WAL")   # once; readers + 1 writer
         with conn:
             conn.execute("""
             CREATE TABLE IF NOT EXISTS notices (
