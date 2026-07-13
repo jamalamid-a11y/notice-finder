@@ -313,13 +313,15 @@ class WaTimesScraper(BaseScraper):
     CATEGORIES = [
         ("category/358/Foreclosure-Sales-FFX-Cty", "Fairfax", "VA"),
         ("category/394/Foreclosure-Sales-PW-Cty", "Prince William", "VA"),
+        # General VA list (holds e.g. RAS Loudoun/Stafford sales that aren't in a
+        # per-county category). Kept high so the time budget always reaches it.
+        ("category/405/Forclosure-Sales-VA", None, "VA"),
         ("category/354/Foreclosure-Sales-ALEX-Cty", "Alexandria", "VA"),
         ("category/355/Foreclosure-Sales-ARL-Cty", "Arlington", "VA"),
         ("category/357/Foreclosure-Sales-DC", "Washington", "DC"),
         ("category/359/Foreclosure-Sales-Mont-Cty", "Montgomery", "MD"),
         ("category/360/Foreclosure-Sales-PG-Cty", "Prince George's", "MD"),
         ("category/393/Foreclosure-Sales-Charles-Cty", "Charles", "MD"),
-        ("category/405/Forclosure-Sales-VA", None, "VA"),
     ]
 
     # Walk deep enough to catch this-week sales that newer postings pushed onto
@@ -398,7 +400,10 @@ class WaTimesScraper(BaseScraper):
     # Hard wall-clock budget for the whole scrape. The site sometimes throttles
     # our detail-page fetches, and on the free tier an unbounded walk hangs the
     # startup refresh — so we stop after this many seconds and keep what we got.
-    TIME_BUDGET = 90
+    # WaTimes now runs last in the refresh (see scrapers/__init__.py), so a larger
+    # budget here only delays WaTimes' own rows — every other source is already
+    # saved — letting it page deep enough to catch all of next week's RAS sales.
+    TIME_BUDGET = 180
 
     def fetch(self, max_pages=1):
         deadline = time.time() + self.TIME_BUDGET
