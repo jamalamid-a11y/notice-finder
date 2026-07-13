@@ -35,7 +35,6 @@ SCRAPERS = [
                    "https://us-central1-enotice-demo-8d99a.cloudfunctions.net/api/",
                    newspaper="The Washington Post",
                    notice_types=["Trustee Sale"]),
-    WaTimesScraper(),
     PowerBIScraper(
         "logs", "LOGS Legal Group",
         cluster="https://wabi-us-north-central-h-primary-api.analysis.windows.net",
@@ -70,6 +69,12 @@ SCRAPERS = [
                             "known-as-the-shops-at-congressional-village-aone-story-commercial-"
                             "building-and-a-leasehold-interest-of-the-first-floor-of-192-"
                             "halpine-road-in-rockville"]),
+    # WaTimes deep-pages 9 newspaper categories under a time budget and is
+    # throttling-prone. It used to sit mid-list, so when it stalled the refresh
+    # never reached LOGS / Aldridge Pite / the auction houses below it and their
+    # next-week sales silently went missing. Keep it near the end — after every
+    # reliable source has populated — so a slow WaTimes can only cost WaTimes rows.
+    WaTimesScraper(),
     VirginiaScraper(),   # slow (day-by-day, ~8 min) — kept last so fast sources load first
 ]
 
