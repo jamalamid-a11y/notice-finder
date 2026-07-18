@@ -17,12 +17,17 @@ class Notice:
         "source", "publication", "published_date", "title",
         "sale_date", "sale_time", "property_address", "court_location",
         "county", "state", "full_text", "url",
+        # Parsed out of the notice prose. On truncated search-result snippets
+        # these are often blank -- the values live in the full notice text,
+        # which sits behind a CAPTCHA and is not fetched.
+        "trustee_name", "trustee_contact", "deposit", "tax_value",
     )
 
     def __init__(self, source, publication=None, published_date=None, title=None,
                  sale_date=None, sale_time=None, property_address=None,
                  court_location=None, county=None, state=None,
-                 full_text=None, url=None):
+                 full_text=None, url=None, trustee_name=None,
+                 trustee_contact=None, deposit=None, tax_value=None):
         self.source = source
         self.publication = publication
         self.published_date = published_date
@@ -35,6 +40,10 @@ class Notice:
         self.state = state
         self.full_text = full_text
         self.url = url
+        self.trustee_name = trustee_name
+        self.trustee_contact = trustee_contact
+        self.deposit = deposit
+        self.tax_value = tax_value
 
     def as_dict(self):
         return {k: getattr(self, k) for k in self.__slots__}
