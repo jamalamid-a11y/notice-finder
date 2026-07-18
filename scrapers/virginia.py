@@ -37,9 +37,13 @@ SEARCH_PATH = "/Search.aspx"
 AS = "ctl00$ContentPlaceHolder1$as1$"
 GRID = "ctl00$ContentPlaceHolder1$WSExtendedGridNP1$GridView1$ctl01$"
 
+# The site's own "Popular Searches -> Foreclosures" preset, captured from the
+# live page. Its syntax matters: terms are separated by DOUBLE spaces and a '+'
+# joins the words of a phrase ("real+estate" = the phrase "real estate").
+# Comma-separated keywords are NOT the site's format and match poorly.
 DEFAULT_KEYWORDS = (
-    "real estate, foreclosure, foreclose, foreclosed, trustee sale, "
-    "judicial sale, notice of sale, forfeiture, forfeit"
+    "real+estate  foreclosure  foreclosed  foreclose  judicial+sale  "
+    "judgment  notice+of+sale  forfeiture  forfeit"
 )
 LOOKBACK_DAYS = 30      # days back from today, searched one day at a time
 PER_PAGE = 50           # 5/10/15/20/25/30/50 are the site's allowed values
@@ -162,7 +166,6 @@ class VirginiaScraper(BaseScraper):
                 continue
             published = lines[1] if self._looks_like_date(lines[1]) else None
             fields = parse_all(body)
-            link = block.find("a", href=True)
             yield Notice(
                 source=self.source_id,
                 publication=lines[0],
@@ -170,10 +173,25 @@ class VirginiaScraper(BaseScraper):
                 title=body[:140],
                 full_text=body,
                 state="VA",
-                url=(BASE + link["href"]) if link and link["href"].startswith("/")
-                    else None,
+                url=self._detail_url(block),
                 **fields,
             )
+
+    @staticmethod
+    def _detail_url(block):
+        """Per-notice permalink.
+
+        The row's <a href> is a bare "/Details.aspx" with no identifier; the
+        real target is in the row's onclick:
+            location.href='Details.aspx?SID=<session>&ID=502803'
+        SID is session-scoped and expires, so keep only the stable numeric ID.
+        """
+        m = re.search(r"Details\.aspx\?[^'\"]*?\bID=(\d+)", str(block), re.I)
+        if m:
+            return f"{BASE}/Details.aspx?ID={m.group(1)}"
+        link = block.find("a", href=True)
+        href = link["href"] if link else ""
+        return BASE + href if href.startswith("/") else None
 
     @staticmethod
     def _looks_like_date(s):
